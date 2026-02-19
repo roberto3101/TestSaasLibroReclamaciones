@@ -15,6 +15,16 @@ type UpdateChatbotRequest struct {
 	Tipo        string `json:"tipo" binding:"required,oneof=ASISTENTE_IA WHATSAPP_BOT TELEGRAM_BOT CUSTOM"`
 	Descripcion string `json:"descripcion"`
 	Activo      bool   `json:"activo"`
+
+	// Permisos (scopes)
+	PuedeLeerReclamos   bool `json:"puede_leer_reclamos"`
+	PuedeResponder      bool `json:"puede_responder"`
+	PuedeCambiarEstado  bool `json:"puede_cambiar_estado"`
+	PuedeEnviarMensajes bool `json:"puede_enviar_mensajes"`
+	PuedeLeerMetricas   bool `json:"puede_leer_metricas"`
+
+	// Restricciones
+	RequiereAprobacion bool `json:"requiere_aprobacion"`
 }
 
 type CreateAPIKeyRequest struct {

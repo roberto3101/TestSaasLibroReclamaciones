@@ -19,14 +19,13 @@ func NewChatbotRepo(db *sql.DB) *ChatbotRepo {
 	return &ChatbotRepo{db: db}
 }
 
-// scanChatbot escanea una fila en un model.Chatbot.
-// Centralizado para evitar repetir el Scan en cada método.
 func scanChatbot(scanner interface{ Scan(...interface{}) error }) (*model.Chatbot, error) {
 	c := &model.Chatbot{}
 	err := scanner.Scan(
 		&c.TenantID, &c.ID, &c.Nombre, &c.Descripcion, &c.Tipo,
 		&c.PuedeLeerReclamos, &c.PuedeResponder, &c.PuedeCambiarEstado,
 		&c.PuedeEnviarMensajes, &c.PuedeLeerMetricas,
+		&c.RequiereAprobacion,
 		&c.Activo, &c.FechaCreacion, &c.FechaActualizacion,
 	)
 	return c, err
@@ -36,6 +35,7 @@ const chatbotColumns = `
 	tenant_id, id, nombre, descripcion, tipo,
 	puede_leer_reclamos, puede_responder, puede_cambiar_estado,
 	puede_enviar_mensajes, puede_leer_metricas,
+	requiere_aprobacion,
 	activo, fecha_creacion, fecha_actualizacion`
 
 func (r *ChatbotRepo) GetByTenant(ctx context.Context, tenantID uuid.UUID) ([]model.Chatbot, error) {
@@ -91,12 +91,20 @@ func (r *ChatbotRepo) Update(ctx context.Context, c *model.Chatbot) error {
 	query := `
 		UPDATE chatbots SET
 			nombre = $1, descripcion = $2, tipo = $3,
-			activo = $4, fecha_actualizacion = $5
-		WHERE tenant_id = $6 AND id = $7`
+			activo = $4,
+			puede_leer_reclamos = $5, puede_responder = $6,
+			puede_cambiar_estado = $7, puede_enviar_mensajes = $8,
+			puede_leer_metricas = $9, requiere_aprobacion = $10,
+			fecha_actualizacion = $11
+		WHERE tenant_id = $12 AND id = $13`
 
 	_, err := r.db.ExecContext(ctx, query,
 		c.Nombre, c.Descripcion, c.Tipo,
-		c.Activo, time.Now(), c.TenantID, c.ID,
+		c.Activo,
+		c.PuedeLeerReclamos, c.PuedeResponder,
+		c.PuedeCambiarEstado, c.PuedeEnviarMensajes,
+		c.PuedeLeerMetricas, c.RequiereAprobacion,
+		time.Now(), c.TenantID, c.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("chatbot_repo.Update: %w", err)
@@ -113,7 +121,6 @@ func (r *ChatbotRepo) Deactivate(ctx context.Context, tenantID, chatbotID uuid.U
 	return nil
 }
 
-// Reactivate reactiva un chatbot previamente desactivado.
 func (r *ChatbotRepo) Reactivate(ctx context.Context, tenantID, chatbotID uuid.UUID) error {
 	query := `UPDATE chatbots SET activo = true, fecha_actualizacion = $1 WHERE tenant_id = $2 AND id = $3`
 	_, err := r.db.ExecContext(ctx, query, time.Now(), tenantID, chatbotID)
@@ -123,8 +130,6 @@ func (r *ChatbotRepo) Reactivate(ctx context.Context, tenantID, chatbotID uuid.U
 	return nil
 }
 
-// SoftDelete marca un chatbot como eliminado (activo=false) y revoca todas sus API keys.
-// Usa una transacción para garantizar consistencia.
 func (r *ChatbotRepo) SoftDelete(ctx context.Context, tenantID, chatbotID uuid.UUID) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -134,7 +139,6 @@ func (r *ChatbotRepo) SoftDelete(ctx context.Context, tenantID, chatbotID uuid.U
 
 	now := time.Now()
 
-	// 1. Desactivar chatbot
 	_, err = tx.ExecContext(ctx,
 		`UPDATE chatbots SET activo = false, fecha_actualizacion = $1 WHERE tenant_id = $2 AND id = $3`,
 		now, tenantID, chatbotID,
@@ -143,7 +147,6 @@ func (r *ChatbotRepo) SoftDelete(ctx context.Context, tenantID, chatbotID uuid.U
 		return fmt.Errorf("chatbot_repo.SoftDelete chatbot: %w", err)
 	}
 
-	// 2. Revocar TODAS las API keys del chatbot
 	_, err = tx.ExecContext(ctx,
 		`UPDATE chatbot_api_keys SET activa = false WHERE tenant_id = $1 AND chatbot_id = $2 AND activa = true`,
 		tenantID, chatbotID,
@@ -155,7 +158,6 @@ func (r *ChatbotRepo) SoftDelete(ctx context.Context, tenantID, chatbotID uuid.U
 	return tx.Commit()
 }
 
-// RevokeAllKeysByChatbot revoca todas las API keys activas de un chatbot.
 func (r *ChatbotRepo) RevokeAllKeysByChatbot(ctx context.Context, tenantID, chatbotID uuid.UUID) error {
 	query := `UPDATE chatbot_api_keys SET activa = false WHERE tenant_id = $1 AND chatbot_id = $2 AND activa = true`
 	_, err := r.db.ExecContext(ctx, query, tenantID, chatbotID)

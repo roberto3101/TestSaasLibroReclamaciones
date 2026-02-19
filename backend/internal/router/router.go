@@ -30,6 +30,7 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 	chatbotRepo := repo.NewChatbotRepo(db)
 	apiKeyRepo := repo.NewChatbotAPIKeyRepo(db)
 	logRepo := repo.NewChatbotLogRepo(db)
+	canalWARepo := repo.NewCanalWhatsAppRepo(db)
 
 	// --- Services ---
 	notifService := service.NewNotificacionService(cfg.SMTP)
@@ -81,11 +82,10 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 	RegisterChatbotRoutes(r, chatbotCtrl, authMw, tenantMw)
 
 	// --- API externa para chatbots (API Key) ---
-	RegisterBotAPIRoutes(r, botAPICtrl, apiKeyRepo, logRepo, cfg.RateLimit)
+	RegisterBotAPIRoutes(r, botAPICtrl, apiKeyRepo, chatbotRepo, logRepo, cfg.RateLimit)
 
-	// ──────────────────────────────────────────
-	// ASISTENTE IA (con fallback automático)
-	// ──────────────────────────────────────────
+	// --- Proveedor de IA (compartido entre asistente interno y WhatsApp) ---
+	var aiProvider ai.Provider
 	if cfg.AI.Provider != "" {
 		primaryCfg := ai.GatewayConfig{
 			Provider: cfg.AI.Provider,
@@ -104,17 +104,44 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 			}
 		}
 
-		aiProvider, err := ai.NewProviderWithFallback(primaryCfg, fallbackCfg)
+		var err error
+		aiProvider, err = ai.NewProviderWithFallback(primaryCfg, fallbackCfg)
 		if err != nil {
-			fmt.Printf("[WARN] Asistente IA no disponible: %v\n", err)
-		} else {
-			assistantRepo := repo.NewAssistantRepo(db)
-			historialAsistenteRepo := repo.NewAsistenteHistorialRepo(db)
-			assistantService := service.NewAssistantService(aiProvider, assistantRepo, historialAsistenteRepo, tenantRepo)
-			assistantCtrl := controller.NewAssistantController(assistantService)
-			RegisterAssistantRoutes(r, assistantCtrl, authMw, tenantMw)
-			fmt.Printf("[INFO] Asistente IA activo (proveedor: %s)\n", aiProvider.Name())
+			fmt.Printf("[WARN] Proveedor IA no disponible: %v\n", err)
 		}
+	}
+
+	// --- WhatsApp: Webhook + Config Admin ---
+	if cfg.WhatsApp.Enabled {
+		whatsappService := service.NewWhatsAppService(
+			reclamoService,
+			tenantRepo,
+			canalWARepo,
+			aiProvider, // puede ser nil — el service tiene fallback a respuestas fijas
+		)
+
+		whatsappCtrl := controller.NewWhatsAppController(cfg.WhatsApp, whatsappService)
+		RegistrarRutasWebhookWhatsApp(r, whatsappCtrl)
+
+		whatsappConfigCtrl := controller.NewWhatsAppConfigController(canalWARepo)
+		RegisterWhatsAppConfigRoutes(r, whatsappConfigCtrl, authMw, tenantMw)
+
+		iaStatus := "sin IA (respuestas fijas)"
+		if aiProvider != nil {
+			iaStatus = aiProvider.Name()
+		}
+		fmt.Printf("[INFO] WhatsApp webhook activo en /webhook/whatsapp (multi-tenant + IA: %s)\n", iaStatus)
+		fmt.Println("[INFO] WhatsApp config admin en /api/v1/canales/whatsapp")
+	}
+
+	// --- Asistente IA interno (panel admin) ---
+	if aiProvider != nil {
+		assistantRepo := repo.NewAssistantRepo(db)
+		historialAsistenteRepo := repo.NewAsistenteHistorialRepo(db)
+		assistantService := service.NewAssistantService(aiProvider, assistantRepo, historialAsistenteRepo, tenantRepo)
+		assistantCtrl := controller.NewAssistantController(assistantService)
+		RegisterAssistantRoutes(r, assistantCtrl, authMw, tenantMw)
+		fmt.Printf("[INFO] Asistente IA activo (proveedor: %s)\n", aiProvider.Name())
 	} else {
 		fmt.Println("[INFO] Asistente IA desactivado (AI_PROVIDER no configurado)")
 	}

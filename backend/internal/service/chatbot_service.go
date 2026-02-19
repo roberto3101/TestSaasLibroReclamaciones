@@ -74,7 +74,21 @@ func (s *ChatbotService) Create(ctx context.Context, tenantID uuid.UUID, nombre,
 	return chatbot, nil
 }
 
-func (s *ChatbotService) Update(ctx context.Context, tenantID, chatbotID uuid.UUID, nombre, tipo, descripcion string, activo bool) error {
+// UpdateChatbotParams agrupa todos los campos editables del chatbot.
+type UpdateChatbotParams struct {
+	Nombre              string
+	Tipo                string
+	Descripcion         string
+	Activo              bool
+	PuedeLeerReclamos   bool
+	PuedeResponder      bool
+	PuedeCambiarEstado  bool
+	PuedeEnviarMensajes bool
+	PuedeLeerMetricas   bool
+	RequiereAprobacion  bool
+}
+
+func (s *ChatbotService) Update(ctx context.Context, tenantID, chatbotID uuid.UUID, params UpdateChatbotParams) error {
 	existing, err := s.chatbotRepo.GetByID(ctx, tenantID, chatbotID)
 	if err != nil {
 		return fmt.Errorf("chatbot_service.Update: %w", err)
@@ -83,10 +97,16 @@ func (s *ChatbotService) Update(ctx context.Context, tenantID, chatbotID uuid.UU
 		return apperror.ErrNotFound
 	}
 
-	existing.Nombre = nombre
-	existing.Tipo = tipo
-	existing.Descripcion = model.NullString{NullString: sql.NullString{String: descripcion, Valid: descripcion != ""}}
-	existing.Activo = activo
+	existing.Nombre = params.Nombre
+	existing.Tipo = params.Tipo
+	existing.Descripcion = model.NullString{NullString: sql.NullString{String: params.Descripcion, Valid: params.Descripcion != ""}}
+	existing.Activo = params.Activo
+	existing.PuedeLeerReclamos = params.PuedeLeerReclamos
+	existing.PuedeResponder = params.PuedeResponder
+	existing.PuedeCambiarEstado = params.PuedeCambiarEstado
+	existing.PuedeEnviarMensajes = params.PuedeEnviarMensajes
+	existing.PuedeLeerMetricas = params.PuedeLeerMetricas
+	existing.RequiereAprobacion = params.RequiereAprobacion
 
 	return s.chatbotRepo.Update(ctx, existing)
 }
@@ -100,13 +120,10 @@ func (s *ChatbotService) Deactivate(ctx context.Context, tenantID, chatbotID uui
 	if existing == nil {
 		return apperror.ErrNotFound
 	}
-
-	// Desactivar chatbot + revocar keys en una transacción
 	return s.chatbotRepo.SoftDelete(ctx, tenantID, chatbotID)
 }
 
 // Reactivate reactiva un chatbot previamente desactivado.
-// Las API keys NO se reactivan — deben generarse nuevas por seguridad.
 func (s *ChatbotService) Reactivate(ctx context.Context, tenantID, chatbotID uuid.UUID) error {
 	existing, err := s.chatbotRepo.GetByID(ctx, tenantID, chatbotID)
 	if err != nil {
@@ -116,14 +133,12 @@ func (s *ChatbotService) Reactivate(ctx context.Context, tenantID, chatbotID uui
 		return apperror.ErrNotFound
 	}
 	if existing.Activo {
-		return nil // Ya está activo
+		return nil
 	}
-
 	return s.chatbotRepo.Reactivate(ctx, tenantID, chatbotID)
 }
 
-// Delete eliminación lógica completa: desactiva chatbot + revoca TODAS sus API keys.
-// Es equivalente a Deactivate pero con semántica de "borrado" para el frontend.
+// Delete eliminación lógica completa.
 func (s *ChatbotService) Delete(ctx context.Context, tenantID, chatbotID uuid.UUID) error {
 	existing, err := s.chatbotRepo.GetByID(ctx, tenantID, chatbotID)
 	if err != nil {
@@ -132,7 +147,6 @@ func (s *ChatbotService) Delete(ctx context.Context, tenantID, chatbotID uuid.UU
 	if existing == nil {
 		return apperror.ErrNotFound
 	}
-
 	return s.chatbotRepo.SoftDelete(ctx, tenantID, chatbotID)
 }
 
@@ -142,9 +156,7 @@ func (s *ChatbotService) GetAPIKeys(ctx context.Context, tenantID, chatbotID uui
 	return s.apiKeyRepo.GetByChatbot(ctx, tenantID, chatbotID)
 }
 
-// GenerateAPIKey crea un nuevo API key y retorna el key en texto plano (solo una vez).
 func (s *ChatbotService) GenerateAPIKey(ctx context.Context, tenantID, chatbotID uuid.UUID, nombre, entorno string, creadoPor uuid.UUID) (*model.APIKey, string, error) {
-	// Verificar chatbot existe y está activo
 	existing, err := s.chatbotRepo.GetByID(ctx, tenantID, chatbotID)
 	if err != nil {
 		return nil, "", fmt.Errorf("chatbot_service.GenerateAPIKey: %w", err)

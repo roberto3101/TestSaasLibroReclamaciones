@@ -84,7 +84,13 @@ export default function LayoutPrincipal() {
         activo: ubicacion.pathname.startsWith('/chatbots'),
         alHacerClick: () => navegar('/chatbots'),
       },
-      // ── NUEVO: Asistente IA ──
+      {
+        id: 'canales-whatsapp',
+        etiqueta: 'WhatsApp',
+        icono: <CodeplexIconoChat />,
+        activo: ubicacion.pathname.startsWith('/canales-whatsapp'),
+        alHacerClick: () => navegar('/canales-whatsapp'),
+      },
       {
         id: 'asistente',
         etiqueta: 'Asistente IA',

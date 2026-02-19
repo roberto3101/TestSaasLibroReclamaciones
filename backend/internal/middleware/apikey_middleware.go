@@ -68,17 +68,3 @@ func APIKeyMiddleware(apiKeyRepo *repo.ChatbotAPIKeyRepo) gin.HandlerFunc {
 	}
 }
 
-// RequireChatbotScope verifica que el chatbot tenga un scope específico.
-func RequireChatbotScope(scopeKey string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		val, exists := c.Get(scopeKey)
-		if !exists || !val.(bool) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "Chatbot no tiene permiso para esta operación",
-				"code":  "SCOPE_INSUFICIENTE",
-			})
-			return
-		}
-		c.Next()
-	}
-}

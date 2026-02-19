@@ -20,6 +20,7 @@ type Config struct {
 	CORS      CORSConfig
 	SMTP      SMTPConfig
 	AI        AIConfig
+	WhatsApp  WhatsAppConfig
 }
 
 type ServerConfig struct {
@@ -79,6 +80,14 @@ type AIConfig struct {
 	FallbackBaseURL  string
 }
 
+// WhatsAppConfig configuración global de WhatsApp Business Cloud API.
+// Los tokens y phone_id por tenant ahora viven en la tabla canales_whatsapp.
+// Solo se conserva VerifyToken como token global para la verificación inicial del webhook por Meta.
+type WhatsAppConfig struct {
+	VerifyToken string // Token global para verificación del webhook con Meta
+	Enabled     bool   // Si el módulo WhatsApp está habilitado
+}
+
 // DSN retorna el connection string para CockroachDB.
 func (c CockroachConfig) DSN() string {
 	if c.Password != "" {
@@ -101,6 +110,8 @@ func (c ServerConfig) IsDevelopment() bool {
 // Load carga la configuración desde variables de entorno.
 func Load() (*Config, error) {
 	_ = godotenv.Load()
+
+	verifyToken := env("WHATSAPP_VERIFY_TOKEN", "")
 
 	cfg := &Config{
 		Server: ServerConfig{
@@ -149,6 +160,10 @@ func Load() (*Config, error) {
 			FallbackAPIKey:   env("AI_FALLBACK_API_KEY", ""),
 			FallbackModel:    env("AI_FALLBACK_MODEL", ""),
 			FallbackBaseURL:  env("AI_FALLBACK_BASE_URL", ""),
+		},
+		WhatsApp: WhatsAppConfig{
+			VerifyToken: verifyToken,
+			Enabled:     verifyToken != "",
 		},
 	}
 

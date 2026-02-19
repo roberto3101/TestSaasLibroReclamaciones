@@ -20,10 +20,9 @@ const PaginaSuscripcion = lazy(() => import('@/modulos/suscripcion/paginas/Pagin
 const PaginaConfigTenant = lazy(() => import('@/modulos/tenant/paginas/PaginaConfigTenant'));
 const PaginaLibroPublico = lazy(() => import('@/modulos/libro-publico/paginas/PaginaLibroPublico'));
 const PaginaConfirmacion = lazy(() => import('@/modulos/libro-publico/paginas/PaginaConfirmacion'));
-
-// CORREGIDO: Se mantiene el seguimiento y se crea la variable correcta para el asistente
 const PaginaSeguimiento = lazy(() => import('@/modulos/libro-publico/paginas/PaginaSeguimiento'));
 const PaginaAsistente = lazy(() => import('@/modulos/asistente/paginas/PaginaAsistente'));
+const PaginaCanalesWhatsApp = lazy(() => import('@/modulos/canales-whatsapp/paginas/PaginaCanalesWhatsApp'));
 
 const Pagina404 = lazy(() => import('@/paginas/no-encontrado/Pagina404'));
 
@@ -65,10 +64,8 @@ export default function Enrutador() {
           <Route path="/chatbots/:id" element={<PaginaDetalleChatbot />} />
           <Route path="/planes" element={<PaginaPlanes />} />
           <Route path="/suscripcion" element={<PaginaSuscripcion />} />
-          
-          {/* Aquí ahora PaginaAsistente ya está definida correctamente */}
           <Route path="/asistente" element={<PaginaAsistente />} />
-          
+          <Route path="/canales-whatsapp" element={<PaginaCanalesWhatsApp />} />
           <Route path="/configuracion" element={<PaginaConfigTenant />} />
         </Route>
 

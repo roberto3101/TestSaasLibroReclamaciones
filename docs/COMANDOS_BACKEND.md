@@ -12,6 +12,23 @@ cd C:\Users\user\Desktop\SaasLibroReclamaciones\backend
 go run ./cmd/codeplex_api/
 ```
 
+
+# 1. Iniciar ngrok (túnel HTTPS para WhatsApp webhook)
+ngrok http 8080
+
+# 2. Copiar la URL https://xxxx.ngrok-free.app y pegarla en:
+# https://developers.facebook.com/apps/1816874562360908/use_cases/customize/?use_case_enum=WHATSAPP_BUSINESS_MESSAGING
+# → Webhook → Edit → Callback URL: https://xxxx.ngrok-free.app/webhook/whatsapp
+# → Verify Token: libro_reclamos_2026
+
+# 3. Iniciar backend
+cd backend && go run ./cmd/codeplex_api/
+
+
+
+
+
+
 Salida esperada:
 ```
 ✓ CockroachDB conectado: localhost:26257/saaslibroreclamacionesv1

@@ -101,9 +101,21 @@ func (ctrl *ChatbotController) Update(c *gin.Context) {
 		return
 	}
 
+	params := service.UpdateChatbotParams{
+		Nombre:              req.Nombre,
+		Tipo:                req.Tipo,
+		Descripcion:         req.Descripcion,
+		Activo:              req.Activo,
+		PuedeLeerReclamos:   req.PuedeLeerReclamos,
+		PuedeResponder:      req.PuedeResponder,
+		PuedeCambiarEstado:  req.PuedeCambiarEstado,
+		PuedeEnviarMensajes: req.PuedeEnviarMensajes,
+		PuedeLeerMetricas:   req.PuedeLeerMetricas,
+		RequiereAprobacion:  req.RequiereAprobacion,
+	}
+
 	if err := ctrl.chatbotService.Update(
-		c.Request.Context(), tenantID, chatbotID,
-		req.Nombre, req.Tipo, req.Descripcion, req.Activo,
+		c.Request.Context(), tenantID, chatbotID, params,
 	); err != nil {
 		helper.Error(c, err)
 		return
@@ -112,7 +124,6 @@ func (ctrl *ChatbotController) Update(c *gin.Context) {
 }
 
 // Deactivate POST /api/v1/chatbots/:id/deactivate
-// Desactiva el chatbot y revoca todas sus API keys.
 func (ctrl *ChatbotController) Deactivate(c *gin.Context) {
 	tenantID, err := helper.GetTenantID(c)
 	if err != nil {
@@ -134,7 +145,6 @@ func (ctrl *ChatbotController) Deactivate(c *gin.Context) {
 }
 
 // Reactivate POST /api/v1/chatbots/:id/reactivate
-// Reactiva un chatbot. Las API keys deben generarse de nuevo.
 func (ctrl *ChatbotController) Reactivate(c *gin.Context) {
 	tenantID, err := helper.GetTenantID(c)
 	if err != nil {
@@ -156,7 +166,6 @@ func (ctrl *ChatbotController) Reactivate(c *gin.Context) {
 }
 
 // Delete DELETE /api/v1/chatbots/:id
-// Eliminación lógica: desactiva chatbot + revoca todas las API keys.
 func (ctrl *ChatbotController) Delete(c *gin.Context) {
 	tenantID, err := helper.GetTenantID(c)
 	if err != nil {
