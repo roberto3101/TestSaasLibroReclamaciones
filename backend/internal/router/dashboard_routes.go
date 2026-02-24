@@ -11,5 +11,6 @@ func RegisterDashboardRoutes(r *gin.Engine, ctrl *controller.DashboardController
 	dashboard.Use(authMw, tenantMw)
 	{
 		dashboard.GET("/uso", ctrl.GetUso)
+		dashboard.GET("/metricas", ctrl.GetMetricas)
 	}
 }

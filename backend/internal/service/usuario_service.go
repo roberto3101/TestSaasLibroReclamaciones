@@ -125,6 +125,21 @@ func (s *UsuarioService) ChangePassword(ctx context.Context, tenantID, userID uu
 	return s.usuarioRepo.UpdatePassword(ctx, tenantID, userID, hash)
 }
 
+func (s *UsuarioService) AdminResetPassword(ctx context.Context, tenantID, targetUserID uuid.UUID, newPwd string) error {
+	user, err := s.usuarioRepo.GetByID(ctx, tenantID, targetUserID)
+	if err != nil {
+		return fmt.Errorf("usuario_service.AdminResetPassword: %w", err)
+	}
+	if user == nil {
+		return apperror.ErrNotFound
+	}
+	hash, err := helper.HashPassword(newPwd)
+	if err != nil {
+		return fmt.Errorf("usuario_service.AdminResetPassword hash: %w", err)
+	}
+	return s.usuarioRepo.UpdatePassword(ctx, tenantID, targetUserID, hash)
+}
+
 func (s *UsuarioService) Deactivate(ctx context.Context, tenantID, userID uuid.UUID) error {
 	user, err := s.usuarioRepo.GetByID(ctx, tenantID, userID)
 	if err != nil {

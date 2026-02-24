@@ -12,3 +12,4 @@ export * from './suscripcion';
 export * from './dashboard';
 export * from './asistente';
 export * from './canal-whatsapp';
+export * from './solicitud-asesor';

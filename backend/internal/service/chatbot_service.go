@@ -45,7 +45,7 @@ func (s *ChatbotService) GetByID(ctx context.Context, tenantID, chatbotID uuid.U
 	return c, nil
 }
 
-func (s *ChatbotService) Create(ctx context.Context, tenantID uuid.UUID, nombre, tipo, descripcion string, creadoPor uuid.UUID) (*model.Chatbot, error) {
+func (s *ChatbotService) Create(ctx context.Context, tenantID uuid.UUID, params CreateChatbotParams) (*model.Chatbot, error) {
 	uso, err := s.dashboardRepo.GetUsoTenant(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("chatbot_service.Create: %w", err)
@@ -62,10 +62,16 @@ func (s *ChatbotService) Create(ctx context.Context, tenantID uuid.UUID, nombre,
 
 	chatbot := &model.Chatbot{
 		TenantModel: model.TenantModel{TenantID: tenantID},
-		Nombre:      nombre,
-		Tipo:        tipo,
-		Descripcion: model.NullString{NullString: sql.NullString{String: descripcion, Valid: descripcion != ""}},
-		CreadoPor:   model.NullUUID{UUID: creadoPor, Valid: creadoPor != uuid.Nil},
+		Nombre:      params.Nombre,
+		Tipo:        params.Tipo,
+		Descripcion: model.NullString{NullString: sql.NullString{String: params.Descripcion, Valid: params.Descripcion != ""}},
+		// Config IA
+		ModeloIA:           model.NullString{NullString: sql.NullString{String: params.ModeloIA, Valid: params.ModeloIA != ""}},
+		PromptSistema:      model.NullString{NullString: sql.NullString{String: params.PromptSistema, Valid: params.PromptSistema != ""}},
+		Temperatura:        model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: params.Temperatura, Valid: params.Temperatura > 0}},
+		MaxTokensRespuesta: model.NullInt64{NullInt64: sql.NullInt64{Int64: int64(params.MaxTokensRespuesta), Valid: params.MaxTokensRespuesta > 0}},
+		// Meta
+		CreadoPor: model.NullUUID{UUID: params.CreadoPor, Valid: params.CreadoPor != uuid.Nil},
 	}
 
 	if err := s.chatbotRepo.Create(ctx, chatbot); err != nil {
@@ -74,12 +80,30 @@ func (s *ChatbotService) Create(ctx context.Context, tenantID uuid.UUID, nombre,
 	return chatbot, nil
 }
 
+// CreateChatbotParams agrupa los datos para crear un chatbot.
+type CreateChatbotParams struct {
+	Nombre             string
+	Tipo               string
+	Descripcion        string
+	ModeloIA           string
+	PromptSistema      string
+	Temperatura        float64
+	MaxTokensRespuesta int
+	CreadoPor          uuid.UUID
+}
+
 // UpdateChatbotParams agrupa todos los campos editables del chatbot.
 type UpdateChatbotParams struct {
 	Nombre              string
 	Tipo                string
 	Descripcion         string
 	Activo              bool
+	// Config IA
+	ModeloIA            string
+	PromptSistema       string
+	Temperatura         float64
+	MaxTokensRespuesta  int
+	// Scopes
 	PuedeLeerReclamos   bool
 	PuedeResponder      bool
 	PuedeCambiarEstado  bool
@@ -101,6 +125,12 @@ func (s *ChatbotService) Update(ctx context.Context, tenantID, chatbotID uuid.UU
 	existing.Tipo = params.Tipo
 	existing.Descripcion = model.NullString{NullString: sql.NullString{String: params.Descripcion, Valid: params.Descripcion != ""}}
 	existing.Activo = params.Activo
+	// Config IA
+	existing.ModeloIA = model.NullString{NullString: sql.NullString{String: params.ModeloIA, Valid: params.ModeloIA != ""}}
+	existing.PromptSistema = model.NullString{NullString: sql.NullString{String: params.PromptSistema, Valid: params.PromptSistema != ""}}
+	existing.Temperatura = model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: params.Temperatura, Valid: params.Temperatura > 0}}
+	existing.MaxTokensRespuesta = model.NullInt64{NullInt64: sql.NullInt64{Int64: int64(params.MaxTokensRespuesta), Valid: params.MaxTokensRespuesta > 0}}
+	// Scopes
 	existing.PuedeLeerReclamos = params.PuedeLeerReclamos
 	existing.PuedeResponder = params.PuedeResponder
 	existing.PuedeCambiarEstado = params.PuedeCambiarEstado

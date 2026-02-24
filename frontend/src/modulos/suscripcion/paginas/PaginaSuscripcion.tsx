@@ -1,75 +1,260 @@
-import { CodeplexPila } from '@codeplex-sac/layout';
-import { CodeplexTarjeta, CodeplexBoton, CodeplexCargando, CodeplexInsignia } from '@codeplex-sac/ui';
-import { usarSuscripcion } from '../ganchos/usarSuscripcion';
+// src/modulos/suscripcion/paginas/PaginaSuscripcion.tsx
+import { useState } from 'react';
+import { CodeplexCargando } from '@codeplex-sac/ui';
+import { CodeplexCaja } from '@codeplex-sac/layout';
+import { usarSuscripcion, usarUsoTenant, usarHistorialSuscripciones } from '../ganchos/usarSuscripcion';
 import { suscripcionApi } from '../api/suscripcion.api';
 import { confirmar } from '@/aplicacion/helpers/confirmar';
 import { notificar } from '@/aplicacion/helpers/toast';
 import { manejarError } from '@/aplicacion/helpers/errores';
-import { formatoFecha } from '@/aplicacion/helpers/formato';
+import { formatoFecha, formatoMoneda } from '@/aplicacion/helpers/formato';
+import { porcentajeUso } from '@/tipos/suscripcion';
+import type { Plan, CicloSuscripcion } from '@/tipos';
+import TarjetasPlanes from '../componentes/TarjetasPlanes';
+
+type Tab = 'resumen' | 'cambiar' | 'historial';
+
+const C = {
+  primario: '#f97316',
+  tarjeta: '#ffffff',
+  texto: '#1f2937',
+  textoSec: '#6b7280',
+  borde: '#e5e7eb',
+  exito: '#10b981',
+  advertencia: '#f59e0b',
+  peligro: '#ef4444',
+  info: '#3b82f6',
+};
 
 export default function PaginaSuscripcion() {
-  const { suscripcion, cargando, recargar } = usarSuscripcion();
+  const { datos, cargando, recargar } = usarSuscripcion();
+  const { uso, cargando: cargandoUso } = usarUsoTenant();
+  const { historial, cargando: cargandoHist } = usarHistorialSuscripciones();
+  const [tab, setTab] = useState<Tab>('resumen');
 
-  if (cargando) return <CodeplexCargando tipo="anillo" etiqueta="Cargando suscripción..." pantallaCompleta />;
+  if (cargando) {
+    return (
+      <CodeplexCaja centrado sx={{ minHeight: '60vh' }}>
+        <CodeplexCargando tipo="anillo" etiqueta="Cargando suscripción..." />
+      </CodeplexCaja>
+    );
+  }
 
-  const cancelar = async () => {
+  if (!datos) {
+    return (
+      <div style={est.contenedor}>
+        <h2 style={est.titulo}>Mi Suscripción</h2>
+        <div style={est.tarjeta}>
+          <p style={{ color: C.textoSec }}>No tienes una suscripción activa.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const { suscripcion: sus, plan } = datos;
+
+  const colorEstado: Record<string, string> = {
+    ACTIVA: C.exito, TRIAL: C.info, SUSPENDIDA: C.advertencia, CANCELADA: C.peligro, VENCIDA: C.peligro,
+  };
+
+  const manejarCambiarPlan = async (nuevoPlan: Plan, ciclo: CicloSuscripcion) => {
     const confirmado = await confirmar({
-      titulo: '¿Cancelar suscripción?',
-      texto: 'Perderás el acceso a las funcionalidades del plan actual.',
-      icono: 'warning',
+      titulo: `¿Cambiar a ${nuevoPlan.nombre}?`,
+      texto: `Tu plan actual será reemplazado por ${nuevoPlan.nombre} (${ciclo.toLowerCase()}).`,
+      textoConfirmar: 'Sí, cambiar plan',
     });
     if (!confirmado) return;
+
     try {
-      await suscripcionApi.cancelar();
-      notificar.exito('Suscripción cancelada');
+      await suscripcionApi.cambiarPlan({ plan_codigo: nuevoPlan.codigo, ciclo });
+      notificar.exito(`Plan cambiado a ${nuevoPlan.nombre}`);
       recargar();
+      setTab('resumen');
     } catch (error) {
       manejarError(error);
     }
   };
 
-  if (!suscripcion) {
-    return (
-      <CodeplexPila direccion="columna" espaciado={3}>
-        <h2 style={{ margin: 0 }}>Suscripción</h2>
-        <CodeplexTarjeta>
-          <p>No tienes una suscripción activa. Ve a la sección de Planes para activar una.</p>
-          <CodeplexBoton texto="Ver Planes" variante="primario" alHacerClick={() => window.location.href = '/planes'} />
-        </CodeplexTarjeta>
-      </CodeplexPila>
-    );
-  }
-
   return (
-    <CodeplexPila direccion="columna" espaciado={3}>
-      <h2 style={{ margin: 0 }}>Mi Suscripción</h2>
-      <CodeplexTarjeta>
-        <CodeplexPila direccion="columna" espaciado={2}>
-          <CodeplexPila direccion="fila" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: 600, fontSize: '1.25rem' }}>Estado</span>
-            <CodeplexInsignia
-              contenido={suscripcion.estado}
-              color={suscripcion.estado === 'ACTIVA' ? 'exito' : 'advertencia'}
-            />
-          </CodeplexPila>
-          <Campo etiqueta="Ciclo" valor={suscripcion.ciclo} />
-          <Campo etiqueta="Fecha Inicio" valor={formatoFecha(suscripcion.fecha_inicio)} />
-          <Campo etiqueta="Fecha Fin" valor={formatoFecha(suscripcion.fecha_fin)} />
-          <Campo etiqueta="Próximo Cobro" valor={formatoFecha(suscripcion.fecha_proximo_cobro)} />
-          {suscripcion.es_trial && <Campo etiqueta="Fin Trial" valor={formatoFecha(suscripcion.fecha_fin_trial)} />}
+    <div style={est.contenedor}>
+      <h2 style={est.titulo}>Mi Suscripción</h2>
 
-          <CodeplexBoton texto="Cancelar Suscripción" variante="peligro" alHacerClick={cancelar} />
-        </CodeplexPila>
-      </CodeplexTarjeta>
-    </CodeplexPila>
+      <div style={est.tabs}>
+        {(['resumen', 'cambiar', 'historial'] as Tab[]).map((t) => (
+          <button key={t} style={est.tab(tab === t)} onClick={() => setTab(t)}>
+            {t === 'resumen' ? 'Resumen' : t === 'cambiar' ? 'Cambiar plan' : 'Historial'}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: Resumen */}
+      {tab === 'resumen' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div style={est.tarjeta}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <span style={{ fontSize: '0.8rem', color: C.textoSec, fontWeight: 600 }}>PLAN ACTUAL</span>
+                <h3 style={{ margin: '4px 0 0', fontSize: '1.5rem', color: C.texto }}>{plan.nombre}</h3>
+              </div>
+              <span style={{
+                background: colorEstado[sus.estado] ?? C.textoSec, color: '#fff',
+                padding: '6px 16px', borderRadius: 20, fontSize: '0.8rem', fontWeight: 700,
+              }}>
+                {sus.estado}{sus.es_trial ? ' (Trial)' : ''}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+              <Campo etiqueta="Ciclo" valor={sus.ciclo} />
+              <Campo etiqueta="Inicio" valor={formatoFecha(sus.fecha_inicio)} />
+              <Campo etiqueta="Próximo cobro" valor={formatoFecha(sus.fecha_proximo_cobro)} />
+              {sus.es_trial && <Campo etiqueta="Trial termina" valor={formatoFecha(sus.fecha_fin_trial)} />}
+              <Campo etiqueta="Precio" valor={`${formatoMoneda(plan.precio_mensual)}/mes`} />
+            </div>
+          </div>
+
+          {!cargandoUso && uso && (
+            <div style={est.tarjeta}>
+              <h4 style={{ margin: '0 0 16px', color: C.texto }}>Uso de recursos</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <BarraUso etiqueta="Sedes" uso={uso.uso_sedes} limite={uso.limite_sedes} />
+                <BarraUso etiqueta="Usuarios" uso={uso.uso_usuarios} limite={uso.limite_usuarios} />
+                <BarraUso etiqueta="Reclamos/mes" uso={uso.uso_reclamos_mes} limite={uso.limite_reclamos_mes} />
+                <BarraUso etiqueta="Chatbots" uso={uso.uso_chatbots} limite={uso.limite_chatbots} />
+                <BarraUso etiqueta="Canales WhatsApp" uso={uso.uso_canales_whatsapp} limite={uso.limite_canales_whatsapp} />
+              </div>
+            </div>
+          )}
+
+          {!cargandoUso && uso && (
+            <div style={est.tarjeta}>
+              <h4 style={{ margin: '0 0 16px', color: C.texto }}>Funcionalidades</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                <FuncItem nombre="Chatbot IA" activo={uso.permite_chatbot} />
+                <FuncItem nombre="WhatsApp" activo={uso.permite_whatsapp} />
+                <FuncItem nombre="Email" activo={uso.permite_email} />
+                <FuncItem nombre="Reportes PDF" activo={uso.permite_reportes_pdf} />
+                <FuncItem nombre="Exportar Excel" activo={uso.permite_exportar_excel} />
+                <FuncItem nombre="API" activo={uso.permite_api} />
+                <FuncItem nombre="Asistente IA" activo={uso.permite_asistente_ia} />
+                <FuncItem nombre="Atención en vivo" activo={uso.permite_atencion_vivo} />
+                <FuncItem nombre="Marca blanca" activo={uso.permite_marca_blanca} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Cambiar plan */}
+      {tab === 'cambiar' && (
+        <TarjetasPlanes planActualCodigo={plan.codigo} onSeleccionar={manejarCambiarPlan} />
+      )}
+
+      {/* Tab: Historial */}
+      {tab === 'historial' && (
+        <div style={est.tarjeta}>
+          {cargandoHist ? (
+            <CodeplexCargando tipo="anillo" etiqueta="Cargando historial..." />
+          ) : historial.length === 0 ? (
+            <p style={{ color: C.textoSec }}>No hay suscripciones anteriores.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={est.tabla}>
+                <thead>
+                  <tr>
+                    <th style={est.th}>Estado</th>
+                    <th style={est.th}>Ciclo</th>
+                    <th style={est.th}>Inicio</th>
+                    <th style={est.th}>Fin</th>
+                    <th style={est.th}>Trial</th>
+                    <th style={est.th}>Activado por</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historial.map((s) => (
+                    <tr key={s.id}>
+                      <td style={est.td}>
+                        <span style={{
+                          background: (colorEstado[s.estado] ?? C.textoSec) + '20',
+                          color: colorEstado[s.estado] ?? C.textoSec,
+                          padding: '4px 10px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 600,
+                        }}>
+                          {s.estado}
+                        </span>
+                      </td>
+                      <td style={est.td}>{s.ciclo}</td>
+                      <td style={est.td}>{formatoFecha(s.fecha_inicio)}</td>
+                      <td style={est.td}>{formatoFecha(s.fecha_fin)}</td>
+                      <td style={est.td}>{s.es_trial ? `Sí (${s.dias_trial}d)` : 'No'}</td>
+                      <td style={est.td}>{s.activado_por ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
+
+// ── Subcomponentes ──────────────────────────────────────────────────────────
 
 function Campo({ etiqueta, valor }: { etiqueta: string; valor: string | null | undefined }) {
   return (
     <div>
-      <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#6b7280' }}>{etiqueta}</span>
-      <p style={{ margin: '2px 0 0' }}>{valor || '—'}</p>
+      <span style={{ fontWeight: 600, fontSize: '0.75rem', color: C.textoSec, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{etiqueta}</span>
+      <p style={{ margin: '4px 0 0', fontWeight: 500, color: C.texto }}>{valor || '—'}</p>
     </div>
   );
 }
+
+function BarraUso({ etiqueta, uso, limite }: { etiqueta: string; uso: number; limite: number }) {
+  const pct = porcentajeUso(uso, limite);
+  const ilimitado = limite === -1;
+  const color = ilimitado ? C.info : pct >= 90 ? C.peligro : pct >= 70 ? C.advertencia : C.exito;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontSize: '0.85rem', fontWeight: 500, color: C.texto }}>{etiqueta}</span>
+        <span style={{ fontSize: '0.85rem', color: C.textoSec }}>{ilimitado ? `${uso} / ∞` : `${uso} / ${limite}`}</span>
+      </div>
+      <div style={{ height: 8, borderRadius: 4, background: '#f3f4f6', overflow: 'hidden' }}>
+        <div style={{ width: ilimitado ? '15%' : `${Math.min(pct, 100)}%`, height: '100%', borderRadius: 4, background: color, transition: 'width 0.5s ease' }} />
+      </div>
+    </div>
+  );
+}
+
+function FuncItem({ nombre, activo }: { nombre: string; activo: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: activo ? 1 : 0.4 }}>
+      <span style={{
+        width: 20, height: 20, borderRadius: '50%', background: activo ? '#ecfdf5' : '#fef2f2',
+        color: activo ? C.exito : C.peligro, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '0.7rem', flexShrink: 0,
+      }}>
+        {activo ? '✓' : '✕'}
+      </span>
+      <span style={{ fontSize: '0.85rem', color: C.texto }}>{nombre}</span>
+    </div>
+  );
+}
+
+// ── Estilos ─────────────────────────────────────────────────────────────────
+
+const est = {
+  contenedor: { maxWidth: 960, margin: '0 auto', padding: '32px 20px' } as React.CSSProperties,
+  titulo: { fontSize: '1.5rem', fontWeight: 700, color: C.texto, margin: '0 0 24px' },
+  tarjeta: { background: C.tarjeta, borderRadius: 12, padding: 24, border: `1px solid ${C.borde}` } as React.CSSProperties,
+  tabs: { display: 'flex', gap: 0, borderBottom: `2px solid ${C.borde}`, marginBottom: 24 } as React.CSSProperties,
+  tab: (activo: boolean) => ({
+    padding: '12px 24px', border: 'none', borderBottom: activo ? `2px solid ${C.primario}` : '2px solid transparent',
+    marginBottom: -2, background: 'none', cursor: 'pointer', fontWeight: activo ? 700 : 500,
+    color: activo ? C.primario : C.textoSec, fontSize: '0.9rem', transition: 'all 0.2s',
+  }) as React.CSSProperties,
+  tabla: { width: '100%', borderCollapse: 'collapse' as const, fontSize: '0.9rem' },
+  th: { textAlign: 'left' as const, padding: '10px 12px', borderBottom: `2px solid ${C.borde}`, color: C.textoSec, fontWeight: 600, fontSize: '0.8rem', textTransform: 'uppercase' as const },
+  td: { padding: '12px', borderBottom: `1px solid ${C.borde}`, color: C.texto },
+};

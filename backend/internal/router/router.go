@@ -31,6 +31,8 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 	apiKeyRepo := repo.NewChatbotAPIKeyRepo(db)
 	logRepo := repo.NewChatbotLogRepo(db)
 	canalWARepo := repo.NewCanalWhatsAppRepo(db)
+	solicitudAsesorRepo := repo.NewSolicitudAsesorRepo(db)
+	mensajeAtencionRepo := repo.NewMensajeAtencionRepo(db)
 
 	// --- Services ---
 	notifService := service.NewNotificacionService(cfg.SMTP)
@@ -45,28 +47,42 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 	respuestaService := service.NewRespuestaService(respuestaRepo, reclamoRepo, historialRepo, notifService, tenantRepo)
 	mensajeService := service.NewMensajeService(mensajeRepo, reclamoRepo, tenantRepo, notifService)
 	chatbotService := service.NewChatbotService(chatbotRepo, apiKeyRepo, dashboardRepo, cfg.APIKey.Prefix)
+	mensajeAtencionService := service.NewMensajeAtencionService(mensajeAtencionRepo, solicitudAsesorRepo, canalWARepo)
+	solicitudAsesorService := service.NewSolicitudAsesorService(solicitudAsesorRepo, mensajeAtencionService, canalWARepo, usuarioRepo)
 
 	// --- Controllers ---
 	planCtrl := controller.NewPlanController(planService)
-	suscripcionCtrl := controller.NewSuscripcionController(suscripcionService)
+	limitesRepo := repo.NewLimitesRepo(db)
+	limitesService := service.NewLimitesService(limitesRepo, cfg.Server.Env)
+	suscripcionCtrl := controller.NewSuscripcionController(suscripcionService, limitesService)
 	tenantCtrl := controller.NewTenantController(tenantService)
 	sedeCtrl := controller.NewSedeController(sedeService)
 	usuarioCtrl := controller.NewUsuarioController(usuarioService)
 	authCtrl := controller.NewAuthController(authService)
 	reclamoCtrl := controller.NewReclamoController(reclamoService)
+	exportarPDFServicio := service.NuevoExportarPDFServicio()
+	exportarExcelServicio := service.NuevoExportarExcelServicio()
+	exportarCtrl := controller.NuevoExportarControlador(reclamoService, tenantService, exportarPDFServicio, exportarExcelServicio)
+
 	respuestaCtrl := controller.NewRespuestaController(respuestaService)
 	mensajeCtrl := controller.NewMensajeController(mensajeService)
 	publicCtrl := controller.NewPublicController(reclamoService, tenantService, sedeService, mensajeService, respuestaService)
 	dashboardCtrl := controller.NewDashboardController(dashboardRepo)
 	chatbotCtrl := controller.NewChatbotController(chatbotService)
 	botAPICtrl := controller.NewBotAPIController(reclamoService, respuestaService, mensajeService, logRepo)
+	solicitudAsesorCtrl := controller.NewSolicitudAsesorController(solicitudAsesorService)
+	mensajeAtencionCtrl := controller.NewMensajeAtencionController(mensajeAtencionService)
+
+	onboardingService := service.NewOnboardingService(db, planRepo, tenantRepo, sedeRepo, usuarioRepo, suscripcionRepo)
+	onboardingCtrl := controller.NewOnboardingController(onboardingService)
 
 	// --- Middlewares ---
 	authMw := middleware.AuthMiddleware(cfg.JWT)
 	tenantMw := middleware.TenantMiddleware(db)
 
 	// --- Rutas públicas ---
-	RegisterLibroPublicoRoutes(r, publicCtrl)
+	RegisterPublicRoutes(r, publicCtrl)
+	RegisterOnboardingRoutes(r, onboardingCtrl)
 
 	// --- Rutas admin (JWT) ---
 	RegisterAuthRoutes(r, authCtrl, authMw, tenantMw)
@@ -75,11 +91,15 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 	RegisterTenantRoutes(r, tenantCtrl, authMw, tenantMw)
 	RegisterSedeRoutes(r, sedeCtrl, authMw, tenantMw)
 	RegisterUsuarioRoutes(r, usuarioCtrl, authMw, tenantMw)
+	RegistrarRutasExportacion(r, exportarCtrl, authMw, tenantMw)
 	RegisterReclamoRoutes(r, reclamoCtrl, authMw, tenantMw)
 	RegisterRespuestaRoutes(r, respuestaCtrl, authMw, tenantMw)
 	RegisterMensajeRoutes(r, mensajeCtrl, authMw, tenantMw)
 	RegisterDashboardRoutes(r, dashboardCtrl, authMw, tenantMw)
 	RegisterChatbotRoutes(r, chatbotCtrl, authMw, tenantMw)
+	adminMw := middleware.RoleMiddleware("ADMIN")
+	RegisterPlanAdminRoutes(r, planCtrl, authMw, tenantMw, adminMw)
+	RegisterSolicitudAsesorRoutes(r, solicitudAsesorCtrl, mensajeAtencionCtrl, authMw, tenantMw)
 
 	// --- API externa para chatbots (API Key) ---
 	RegisterBotAPIRoutes(r, botAPICtrl, apiKeyRepo, chatbotRepo, logRepo, cfg.RateLimit)
@@ -115,15 +135,19 @@ func RegisterRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB) {
 	if cfg.WhatsApp.Enabled {
 		whatsappService := service.NewWhatsAppService(
 			reclamoService,
+			solicitudAsesorService,
+			mensajeAtencionService,
 			tenantRepo,
 			canalWARepo,
-			aiProvider, // puede ser nil — el service tiene fallback a respuestas fijas
+			chatbotRepo,
+			aiProvider,
 		)
 
 		whatsappCtrl := controller.NewWhatsAppController(cfg.WhatsApp, whatsappService)
 		RegistrarRutasWebhookWhatsApp(r, whatsappCtrl)
 
-		whatsappConfigCtrl := controller.NewWhatsAppConfigController(canalWARepo)
+		// ← CAMBIO: ahora recibe limitesService para validar límite de canales
+		whatsappConfigCtrl := controller.NewWhatsAppConfigController(canalWARepo, chatbotRepo, limitesService)
 		RegisterWhatsAppConfigRoutes(r, whatsappConfigCtrl, authMw, tenantMw)
 
 		iaStatus := "sin IA (respuestas fijas)"

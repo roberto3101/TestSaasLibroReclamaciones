@@ -75,6 +75,7 @@ export interface CrearChatbotRequest {
   modelo_ia?: string;
   prompt_sistema?: string;
   temperatura?: number;
+  max_tokens_respuesta?: number;
 }
 
 export interface ActualizarChatbotRequest {
@@ -87,10 +88,14 @@ export interface ActualizarChatbotRequest {
   modelo_ia?: string;
   prompt_sistema?: string;
   temperatura?: number;
+  max_tokens_respuesta?: number;
 
   // Permisos (Scopes)
+  puede_leer_reclamos?: boolean;
   puede_responder?: boolean;
   puede_cambiar_estado?: boolean;
+  puede_enviar_mensajes?: boolean;
+  puede_leer_metricas?: boolean;
   requiere_aprobacion?: boolean;
 }
 

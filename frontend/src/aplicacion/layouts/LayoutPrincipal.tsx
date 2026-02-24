@@ -10,7 +10,6 @@ import {
   CodeplexIconoEdificio,
   CodeplexIconoChat,
   CodeplexIconoLlave,
-  CodeplexIconoMoneda,
   CodeplexIconoHerramientas,
   CodeplexIconoLibro,
 } from '@codeplex-sac/icons';
@@ -19,6 +18,7 @@ import { usarEstadoUI } from '@/aplicacion/estado/estadoUI';
 import { ModalSesionExpirada } from '@/componentes/ui/ModalSesionExpirada';
 import { ModalSedesPublicas } from '@/componentes/ui/ModalSedesPublicas';
 import { limpiarSesion } from '@/aplicacion/helpers/sesion';
+import BannerTrial from '@/aplicacion/componentes/BannerTrial';
 
 export default function LayoutPrincipal() {
   const { usuario } = usarEstadoAuth();
@@ -92,18 +92,18 @@ export default function LayoutPrincipal() {
         alHacerClick: () => navegar('/canales-whatsapp'),
       },
       {
+        id: 'atencion-vivo',
+        etiqueta: 'Atención en Vivo',
+        icono: <CodeplexIconoChat />,
+        activo: ubicacion.pathname.startsWith('/atencion-vivo'),
+        alHacerClick: () => navegar('/atencion-vivo'),
+      },
+      {
         id: 'asistente',
         etiqueta: 'Asistente IA',
         icono: <CodeplexIconoChat />,
         activo: ubicacion.pathname.startsWith('/asistente'),
         alHacerClick: () => navegar('/asistente'),
-      },
-      {
-        id: 'planes',
-        etiqueta: 'Planes',
-        icono: <CodeplexIconoMoneda />,
-        activo: ubicacion.pathname.startsWith('/planes'),
-        alHacerClick: () => navegar('/planes'),
       },
       {
         id: 'suscripcion',
@@ -138,6 +138,7 @@ export default function LayoutPrincipal() {
           colapsado={barraLateralColapsada}
           alAlternar={alternarBarraLateral}
         />
+        <BannerTrial />
         <Outlet />
       </CodeplexEsqueleto>
       <ModalSesionExpirada />

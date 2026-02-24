@@ -62,9 +62,10 @@ export interface Reclamo {
 
   atendido_por: Nullable<string>;
   canal_origen: CanalOrigen;
+  nombre_atendido_por?: string;
   
   // Agregado para soportar respuestas de la API
-  mensaje?: string; 
+  mensaje?: string;
 
   // --- NUEVOS CAMPOS (Opcionales para no romper) ---
   respuesta_empresa?: string;

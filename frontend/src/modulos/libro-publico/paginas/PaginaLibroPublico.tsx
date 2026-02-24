@@ -48,11 +48,12 @@ export default function PaginaLibroPublico() {
         setTenant(t);
         setSedes(s || []);
 
-        // Si viene sedeSlug en la URL, auto-seleccionar esa sede
-        if (sedeSlug) {
-          const sedeExiste = (s || []).some((sede: Sede) => sede.slug === sedeSlug);
+        // Si viene sedeSlug en la URL o ?sede= en query param, auto-seleccionar
+        const sedeParam = sedeSlug || new URLSearchParams(window.location.search).get('sede');
+        if (sedeParam) {
+          const sedeExiste = (s || []).some((sede: Sede) => sede.slug === sedeParam);
           if (sedeExiste) {
-            setForm((prev) => ({ ...prev, sede_slug: sedeSlug }));
+            setForm((prev) => ({ ...prev, sede_slug: sedeParam }));
           }
         }
       })

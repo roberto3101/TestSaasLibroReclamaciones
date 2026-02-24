@@ -21,8 +21,9 @@ func RegisterUsuarioRoutes(r *gin.Engine, ctrl *controller.UsuarioController, au
 		admin.Use(middleware.RoleMiddleware(model.RolAdmin))
 		{
 			admin.POST("", ctrl.Create)
-			admin.PUT("/:id", ctrl.Update)
-			admin.DELETE("/:id", ctrl.Deactivate)
+		admin.PUT("/:id", ctrl.Update)
+		admin.PATCH("/:id/password", ctrl.AdminResetPassword)
+		admin.DELETE("/:id", ctrl.Deactivate)
 		}
 	}
 }

@@ -23,6 +23,8 @@ const PaginaConfirmacion = lazy(() => import('@/modulos/libro-publico/paginas/Pa
 const PaginaSeguimiento = lazy(() => import('@/modulos/libro-publico/paginas/PaginaSeguimiento'));
 const PaginaAsistente = lazy(() => import('@/modulos/asistente/paginas/PaginaAsistente'));
 const PaginaCanalesWhatsApp = lazy(() => import('@/modulos/canales-whatsapp/paginas/PaginaCanalesWhatsApp'));
+const PaginaSolicitudesAsesor = lazy(() => import('@/modulos/atencion-vivo/paginas/PaginaSolicitudesAsesor'));
+const AdminPlanes = lazy(() => import('@/modulos/planes/paginas/AdminPlanes'));
 
 const Pagina404 = lazy(() => import('@/paginas/no-encontrado/Pagina404'));
 
@@ -66,6 +68,8 @@ export default function Enrutador() {
           <Route path="/suscripcion" element={<PaginaSuscripcion />} />
           <Route path="/asistente" element={<PaginaAsistente />} />
           <Route path="/canales-whatsapp" element={<PaginaCanalesWhatsApp />} />
+          <Route path="/atencion-vivo" element={<PaginaSolicitudesAsesor />} />
+          <Route path="/admin/planes" element={<AdminPlanes />} />
           <Route path="/configuracion" element={<PaginaConfigTenant />} />
         </Route>
 

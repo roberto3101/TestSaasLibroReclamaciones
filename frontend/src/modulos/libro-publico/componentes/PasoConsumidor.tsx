@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { CodeplexCampoTexto, CodeplexSelector, CodeplexCasilla, CodeplexBoton, CodeplexTarjeta } from '@codeplex-sac/ui';
 import { CodeplexPila, CodeplexCuadricula, CodeplexCaja } from '@codeplex-sac/layout';
+import { lazy, Suspense } from 'react';
 import type { CrearReclamoRequest, Sede } from '@/tipos';
+
+const MapaUbicacion = lazy(() => import('@/aplicacion/componentes/MapaUbicacion'));
 import { notificar } from '@/aplicacion/helpers/toast';
 import type { SelectChangeEvent } from '@mui/material/Select';
 
@@ -267,6 +270,28 @@ export function PasoConsumidor({ form, sedes, actualizar, alSiguiente, colorPrim
               />
             </CodeplexCuadricula>
           )}
+
+          {/* Mapa de la sede seleccionada */}
+          {(() => {
+            const sede = sedes.find((s) => s.slug === form.sede_slug);
+            if (!sede?.latitud || !sede?.longitud) return null;
+            return (
+              <CodeplexCuadricula elemento tamano={{ xs: 12 }}>
+                <p style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: 6, fontWeight: 500 }}>
+                  📍 Ubicación de {sede.nombre}
+                </p>
+                <Suspense fallback={<div style={{ height: 180, background: '#f3f4f6', borderRadius: 8 }} />}>
+                  <MapaUbicacion
+                    latitud={sede.latitud}
+                    longitud={sede.longitud}
+                    editable={false}
+                    altura={180}
+                    nombreSede={sede.nombre}
+                  />
+                </Suspense>
+              </CodeplexCuadricula>
+            );
+          })()}
 
           <CodeplexCuadricula elemento tamano={{ xs: 12 }}>
             <CodeplexCampoTexto 

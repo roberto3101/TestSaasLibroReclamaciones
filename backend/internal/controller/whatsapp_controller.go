@@ -129,7 +129,8 @@ func (ctrl *WhatsAppController) RecibirMensajeEntrante(c *gin.Context) {
 				continue
 			}
 
-			fmt.Printf("[WhatsApp] Canal resuelto → tenant=%s phone=%s\n", canalResuelto.TenantID, canalResuelto.PhoneID)
+			fmt.Printf("[WhatsApp] Canal resuelto → tenant=%s phone=%s chatbot=%v\n",
+				canalResuelto.TenantID, canalResuelto.PhoneID, canalResuelto.ChatbotID)
 
 			// ── PROCESAR CADA MENSAJE ──
 			for _, mensaje := range cambio.Value.Messages {
@@ -149,16 +150,18 @@ func (ctrl *WhatsAppController) RecibirMensajeEntrante(c *gin.Context) {
 				ctx, cancelar := context.WithTimeout(context.Background(), 30*time.Second)
 				respuesta := ctrl.whatsappService.ProcesarMensaje(
 					ctx,
-					canalResuelto.TenantID,
-					mensaje.From, // teléfono del usuario = clave de la conversación
+					canalResuelto, // ahora pasa el canal completo (incluye ChatbotID)
+					mensaje.From,
 					mensaje.Text.Body,
 				)
 				cancelar()
 
-				ctrl.enviarMensajeDeTexto(
-					canalResuelto.PhoneID, canalResuelto.AccessToken,
-					mensaje.From, respuesta,
-				)
+				if respuesta != "" {
+					ctrl.enviarMensajeDeTexto(
+						canalResuelto.PhoneID, canalResuelto.AccessToken,
+						mensaje.From, respuesta,
+					)
+				}
 			}
 		}
 	}

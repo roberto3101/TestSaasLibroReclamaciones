@@ -19,13 +19,19 @@ func NewChatbotRepo(db *sql.DB) *ChatbotRepo {
 	return &ChatbotRepo{db: db}
 }
 
+// scanChatbot escanea una fila completa del chatbot, incluyendo campos IA.
 func scanChatbot(scanner interface{ Scan(...interface{}) error }) (*model.Chatbot, error) {
 	c := &model.Chatbot{}
 	err := scanner.Scan(
 		&c.TenantID, &c.ID, &c.Nombre, &c.Descripcion, &c.Tipo,
+		// Config IA
+		&c.ModeloIA, &c.PromptSistema, &c.Temperatura, &c.MaxTokensRespuesta,
+		// Scopes
 		&c.PuedeLeerReclamos, &c.PuedeResponder, &c.PuedeCambiarEstado,
 		&c.PuedeEnviarMensajes, &c.PuedeLeerMetricas,
+		// Restricciones
 		&c.RequiereAprobacion,
+		// Estado
 		&c.Activo, &c.FechaCreacion, &c.FechaActualizacion,
 	)
 	return c, err
@@ -33,6 +39,7 @@ func scanChatbot(scanner interface{ Scan(...interface{}) error }) (*model.Chatbo
 
 const chatbotColumns = `
 	tenant_id, id, nombre, descripcion, tipo,
+	modelo_ia, prompt_sistema, temperatura, max_tokens_respuesta,
 	puede_leer_reclamos, puede_responder, puede_cambiar_estado,
 	puede_enviar_mensajes, puede_leer_metricas,
 	requiere_aprobacion,
@@ -78,12 +85,17 @@ func (r *ChatbotRepo) GetByID(ctx context.Context, tenantID, chatbotID uuid.UUID
 
 func (r *ChatbotRepo) Create(ctx context.Context, c *model.Chatbot) error {
 	query := `
-		INSERT INTO chatbots (tenant_id, nombre, descripcion, tipo, creado_por)
-		VALUES ($1,$2,$3,$4,$5)
+		INSERT INTO chatbots (
+			tenant_id, nombre, descripcion, tipo,
+			modelo_ia, prompt_sistema, temperatura, max_tokens_respuesta,
+			creado_por
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING id, fecha_creacion, fecha_actualizacion`
 
 	return r.db.QueryRowContext(ctx, query,
-		c.TenantID, c.Nombre, c.Descripcion, c.Tipo, c.CreadoPor,
+		c.TenantID, c.Nombre, c.Descripcion, c.Tipo,
+		c.ModeloIA, c.PromptSistema, c.Temperatura, c.MaxTokensRespuesta,
+		c.CreadoPor,
 	).Scan(&c.ID, &c.FechaCreacion, &c.FechaActualizacion)
 }
 
@@ -91,15 +103,17 @@ func (r *ChatbotRepo) Update(ctx context.Context, c *model.Chatbot) error {
 	query := `
 		UPDATE chatbots SET
 			nombre = $1, descripcion = $2, tipo = $3,
-			activo = $4,
-			puede_leer_reclamos = $5, puede_responder = $6,
-			puede_cambiar_estado = $7, puede_enviar_mensajes = $8,
-			puede_leer_metricas = $9, requiere_aprobacion = $10,
-			fecha_actualizacion = $11
-		WHERE tenant_id = $12 AND id = $13`
+			modelo_ia = $4, prompt_sistema = $5, temperatura = $6, max_tokens_respuesta = $7,
+			activo = $8,
+			puede_leer_reclamos = $9, puede_responder = $10,
+			puede_cambiar_estado = $11, puede_enviar_mensajes = $12,
+			puede_leer_metricas = $13, requiere_aprobacion = $14,
+			fecha_actualizacion = $15
+		WHERE tenant_id = $16 AND id = $17`
 
 	_, err := r.db.ExecContext(ctx, query,
 		c.Nombre, c.Descripcion, c.Tipo,
+		c.ModeloIA, c.PromptSistema, c.Temperatura, c.MaxTokensRespuesta,
 		c.Activo,
 		c.PuedeLeerReclamos, c.PuedeResponder,
 		c.PuedeCambiarEstado, c.PuedeEnviarMensajes,

@@ -23,27 +23,67 @@ func NewNotificacionService(cfg config.SMTPConfig) *NotificacionService {
 
 // ─── BRANDING HELPER ────────────────────────────────────────────────────────
 
-func getBranding(tenant *model.Tenant) (string, string, string) {
-	color := "#1a56db"
+type brandingInfo struct {
+	color    string
+	logoHTML string
+	slug     string
+	logoData []byte // bytes decodificados si es base64
+	logoMIME string // e.g. "image/jpeg"
+}
+
+// parseDataURL extrae MIME type y bytes de un data URL (data:image/jpeg;base64,...)
+func parseDataURL(dataURL string) (mime string, data []byte, ok bool) {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return "", nil, false
+	}
+	parts := strings.SplitN(dataURL, ",", 2)
+	if len(parts) != 2 {
+		return "", nil, false
+	}
+	header := strings.TrimPrefix(parts[0], "data:")
+	header = strings.TrimSuffix(header, ";base64")
+	decoded, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", nil, false
+	}
+	return header, decoded, true
+}
+
+func getBranding(tenant *model.Tenant) brandingInfo {
+	b := brandingInfo{
+		color: "#1a56db",
+		slug:  "portal",
+	}
 	razonSocial := "La Empresa"
-	slug := "portal"
 
 	if tenant != nil {
 		if tenant.ColorPrimario != "" {
-			color = tenant.ColorPrimario
+			b.color = tenant.ColorPrimario
 		}
 		razonSocial = tenant.RazonSocial
 		if tenant.Slug != "" {
-			slug = tenant.Slug
+			b.slug = tenant.Slug
 		}
 	}
 
-	logoHTML := `<h2 style="color: ` + color + `; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">` + razonSocial + `</h2>`
+	// Fallback: texto plano
+	b.logoHTML = `<h2 style="color: ` + b.color + `; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">` + razonSocial + `</h2>`
 
 	if tenant != nil && tenant.LogoURL.Valid && tenant.LogoURL.String != "" {
-		logoHTML = `<img src="` + tenant.LogoURL.String + `" alt="` + razonSocial + `" style="max-height: 56px; max-width: 200px; object-fit: contain;">`
+		logoURL := tenant.LogoURL.String
+
+		// ¿Es base64 data URL? → usar CID inline
+		if mime, data, ok := parseDataURL(logoURL); ok {
+			b.logoData = data
+			b.logoMIME = mime
+			b.logoHTML = `<img src="cid:logo" alt="` + razonSocial + `" style="max-height: 56px; max-width: 200px; object-fit: contain;">`
+		} else {
+			// URL normal (https://...)
+			b.logoHTML = `<img src="` + logoURL + `" alt="` + razonSocial + `" style="max-height: 56px; max-width: 200px; object-fit: contain;">`
+		}
 	}
-	return color, logoHTML, slug
+
+	return b
 }
 
 // buildEmail construye el HTML completo del correo.
@@ -85,7 +125,6 @@ func buildEmail(color, logoHTML, innerContent, footerText string) string {
 	// Body
 	sb.WriteString("        <tr>\r\n")
 	sb.WriteString("          <td style=\"padding: 36px 40px 32px 40px;\">\r\n")
-	// Escribir el inner content línea por línea
 	writeWrapped(&sb, innerContent)
 	sb.WriteString("\r\n")
 	sb.WriteString("          </td>\r\n")
@@ -115,7 +154,6 @@ func buildEmail(color, logoHTML, innerContent, footerText string) string {
 }
 
 // writeWrapped escribe contenido HTML asegurando que ninguna línea exceda 900 caracteres.
-// Busca puntos de corte naturales (>, espacios) para no romper el HTML.
 func writeWrapped(sb *strings.Builder, content string) {
 	const maxLine = 900
 
@@ -125,17 +163,14 @@ func writeWrapped(sb *strings.Builder, content string) {
 			return
 		}
 
-		// Buscar un buen punto de corte dentro de los primeros maxLine chars
 		chunk := content[:maxLine]
 		cutAt := -1
 
-		// Preferir cortar después de '>' (cierre de tag)
 		lastGt := strings.LastIndex(chunk, ">")
 		if lastGt > maxLine/2 {
 			cutAt = lastGt + 1
 		}
 
-		// Si no, cortar en un espacio
 		if cutAt == -1 {
 			lastSpace := strings.LastIndex(chunk, " ")
 			if lastSpace > maxLine/2 {
@@ -143,7 +178,6 @@ func writeWrapped(sb *strings.Builder, content string) {
 			}
 		}
 
-		// Último recurso: cortar en maxLine
 		if cutAt == -1 {
 			cutAt = maxLine
 		}
@@ -165,7 +199,8 @@ func (s *NotificacionService) EnviarNotificacionReclamo(
 		return nil
 	}
 
-	color, logoHTML, _ := getBranding(tenant)
+	b := getBranding(tenant)
+	color, logoHTML := b.color, b.logoHTML
 	asunto := "Confirmacion de Registro - " + codigoReclamo
 
 	var inner strings.Builder
@@ -220,7 +255,7 @@ func (s *NotificacionService) EnviarNotificacionReclamo(
 	footer := "Este correo fue enviado por <strong>" + razon + "</strong>.<br>\r\nSi no reconoce esta solicitud, puede ignorar este mensaje."
 
 	cuerpo := buildEmail(color, logoHTML, inner.String(), footer)
-	return s.enviarEmailBase(paraEmail, asunto, cuerpo, nil, "")
+	return s.enviarEmailBase(paraEmail, asunto, cuerpo, nil, "", b.logoData, b.logoMIME)
 }
 
 // EnviarNotificacionNuevoReclamoEmpresa notifica a la empresa que llegó un reclamo nuevo.
@@ -232,7 +267,8 @@ func (s *NotificacionService) EnviarNotificacionNuevoReclamoEmpresa(
 		return nil
 	}
 
-	color, logoHTML, _ := getBranding(tenant)
+	b := getBranding(tenant)
+	color, logoHTML := b.color, b.logoHTML
 	asunto := "Nuevo " + tipoSolicitud + " recibido - " + codigoReclamo
 
 	badgeColor := "#dc2626"
@@ -305,7 +341,7 @@ func (s *NotificacionService) EnviarNotificacionNuevoReclamoEmpresa(
 
 	footer := "Notificacion interna del sistema de Libro de Reclamaciones."
 	cuerpo := buildEmail(color, logoHTML, inner.String(), footer)
-	return s.enviarEmailBase(emailEmpresa, asunto, cuerpo, nil, "")
+	return s.enviarEmailBase(emailEmpresa, asunto, cuerpo, nil, "", b.logoData, b.logoMIME)
 }
 
 // EnviarResolucionCliente envía la respuesta final al cliente con PDF adjunto.
@@ -317,7 +353,8 @@ func (s *NotificacionService) EnviarResolucionCliente(
 		return nil
 	}
 
-	color, logoHTML, _ := getBranding(tenant)
+	b := getBranding(tenant)
+	color, logoHTML := b.color, b.logoHTML
 	asunto := "Resolucion de su caso - " + codigoReclamo
 
 	previewResp := respuestaTexto
@@ -345,7 +382,6 @@ func (s *NotificacionService) EnviarResolucionCliente(
 	inner.WriteString(`        color: #374151; line-height: 1.7;` + "\r\n")
 	inner.WriteString(`        font-style: italic;">` + "\r\n")
 
-	// Escribir la respuesta con line wrapping
 	writeWrapped(&inner, previewResp)
 
 	inner.WriteString("\r\n")
@@ -367,7 +403,7 @@ func (s *NotificacionService) EnviarResolucionCliente(
 
 	cuerpo := buildEmail(color, logoHTML, inner.String(), footer)
 	nombreArchivo := "Resolucion_" + codigoReclamo + ".pdf"
-	return s.enviarEmailBase(paraEmail, asunto, cuerpo, pdfBytes, nombreArchivo)
+	return s.enviarEmailBase(paraEmail, asunto, cuerpo, pdfBytes, nombreArchivo, b.logoData, b.logoMIME)
 }
 
 // EnviarNotificacionCambioEstado notifica al cliente sobre un cambio de estado.
@@ -379,7 +415,8 @@ func (s *NotificacionService) EnviarNotificacionCambioEstado(
 		return nil
 	}
 
-	color, logoHTML, _ := getBranding(tenant)
+	b := getBranding(tenant)
+	color, logoHTML := b.color, b.logoHTML
 	asunto := "Actualizacion de su caso - " + codigo
 
 	estadoColor := color
@@ -443,7 +480,7 @@ func (s *NotificacionService) EnviarNotificacionCambioEstado(
 	footer := "Notificacion enviada por <strong>" + razon + "</strong>."
 
 	cuerpo := buildEmail(color, logoHTML, inner.String(), footer)
-	return s.enviarEmailBase(emailDestino, asunto, cuerpo, nil, "")
+	return s.enviarEmailBase(emailDestino, asunto, cuerpo, nil, "", b.logoData, b.logoMIME)
 }
 
 // EnviarNotificacionMensajeNuevo notifica al cliente de un nuevo mensaje de chat.
@@ -455,7 +492,8 @@ func (s *NotificacionService) EnviarNotificacionMensajeNuevo(
 		return nil
 	}
 
-	color, logoHTML, slug := getBranding(tenant)
+	b := getBranding(tenant)
+	color, logoHTML, slug := b.color, b.logoHTML, b.slug
 	asunto := "Nuevo mensaje sobre su caso " + codigo
 
 	preview := mensajePreview
@@ -514,13 +552,14 @@ func (s *NotificacionService) EnviarNotificacionMensajeNuevo(
 	footer := "Mensaje enviado desde el portal de <strong>" + razon + "</strong>."
 
 	cuerpo := buildEmail(color, logoHTML, inner.String(), footer)
-	return s.enviarEmailBase(emailDestino, asunto, cuerpo, nil, "")
+	return s.enviarEmailBase(emailDestino, asunto, cuerpo, nil, "", b.logoData, b.logoMIME)
 }
 
 // ─── SMTP BASE ──────────────────────────────────────────────────────────────
 
 func (s *NotificacionService) enviarEmailBase(
 	paraEmail, asunto, cuerpo string, adjunto []byte, nombreAdjunto string,
+	logoData []byte, logoMIME string,
 ) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 	auth := smtp.PlainAuth("", s.cfg.User, s.cfg.Pass, s.cfg.Host)
@@ -544,23 +583,63 @@ func (s *NotificacionService) enviarEmailBase(
 	msg.WriteString("  boundary=\"" + boundary + "\"\r\n")
 	msg.WriteString("\r\n")
 
-	// Parte 1: HTML (Base64 para evitar error line too long)
-	msg.WriteString("--" + boundary + "\r\n")
-	msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
-	msg.WriteString("Content-Transfer-Encoding: base64\r\n")
-	msg.WriteString("\r\n")
+	// Si hay logo inline, usar multipart/related para HTML + imagen
+	if len(logoData) > 0 {
+		relBoundary := "----=_Related_Codeplex_" + fmt.Sprintf("%d", now.UnixNano()+1)
+		msg.WriteString("--" + boundary + "\r\n")
+		msg.WriteString("Content-Type: multipart/related;\r\n")
+		msg.WriteString("  boundary=\"" + relBoundary + "\"\r\n")
+		msg.WriteString("\r\n")
 
-	// Codificamos el HTML en Base64 y lo partimos en líneas de 76 chars
-	encodedBody := base64.StdEncoding.EncodeToString([]byte(cuerpo))
-	const maxLineLen = 76
-	for i := 0; i < len(encodedBody); i += maxLineLen {
-		end := i + maxLineLen
-		if end > len(encodedBody) {
-			end = len(encodedBody)
+		// Parte 1a: HTML dentro de related
+		msg.WriteString("--" + relBoundary + "\r\n")
+		msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
+		msg.WriteString("\r\n")
+		encodedBody := base64.StdEncoding.EncodeToString([]byte(cuerpo))
+		for i := 0; i < len(encodedBody); i += 76 {
+			end := i + 76
+			if end > len(encodedBody) {
+				end = len(encodedBody)
+			}
+			msg.WriteString(encodedBody[i:end] + "\r\n")
 		}
-		msg.WriteString(encodedBody[i:end] + "\r\n")
+		msg.WriteString("\r\n")
+
+		// Parte 1b: Logo inline con Content-ID
+		msg.WriteString("--" + relBoundary + "\r\n")
+		msg.WriteString("Content-Type: " + logoMIME + "\r\n")
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
+		msg.WriteString("Content-ID: <logo>\r\n")
+		msg.WriteString("Content-Disposition: inline; filename=\"logo.jpg\"\r\n")
+		msg.WriteString("\r\n")
+		encodedLogo := base64.StdEncoding.EncodeToString(logoData)
+		for i := 0; i < len(encodedLogo); i += 76 {
+			end := i + 76
+			if end > len(encodedLogo) {
+				end = len(encodedLogo)
+			}
+			msg.WriteString(encodedLogo[i:end] + "\r\n")
+		}
+		msg.WriteString("\r\n")
+		msg.WriteString("--" + relBoundary + "--\r\n")
+		msg.WriteString("\r\n")
+	} else {
+		// Sin logo: HTML directo
+		msg.WriteString("--" + boundary + "\r\n")
+		msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		msg.WriteString("Content-Transfer-Encoding: base64\r\n")
+		msg.WriteString("\r\n")
+		encodedBody := base64.StdEncoding.EncodeToString([]byte(cuerpo))
+		for i := 0; i < len(encodedBody); i += 76 {
+			end := i + 76
+			if end > len(encodedBody) {
+				end = len(encodedBody)
+			}
+			msg.WriteString(encodedBody[i:end] + "\r\n")
+		}
+		msg.WriteString("\r\n")
 	}
-	msg.WriteString("\r\n")
 
 	// Parte 2: Adjunto PDF (si existe)
 	if len(adjunto) > 0 {
@@ -574,7 +653,6 @@ func (s *NotificacionService) enviarEmailBase(
 		msg.WriteString("  filename=\"" + nombreAdjunto + "\"\r\n")
 		msg.WriteString("\r\n")
 
-		// Base64 en líneas de 76 caracteres (RFC 2045)
 		for i := 0; i < len(encoded); i += 76 {
 			end := i + 76
 			if end > len(encoded) {

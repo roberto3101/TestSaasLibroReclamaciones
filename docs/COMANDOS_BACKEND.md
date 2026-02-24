@@ -24,6 +24,9 @@ ngrok http 8080
 # 3. Iniciar backend
 cd backend && go run ./cmd/codeplex_api/
 
+# script para crear nuevos tenants (cambiar datos)
+Invoke-WebRequest -Uri "http://localhost:8080/api/v1/onboarding" -Method POST -ContentType "application/json" -Body '{"razon_social":"Polleria El Rey SAC","ruc":"20512345678","email":"admin@polleria.com","password":"Admin1234","nombre_admin":"Juan Perez","telefono":"987654321"}'
+
 
 
 

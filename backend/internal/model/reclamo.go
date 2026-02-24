@@ -66,6 +66,9 @@ type Reclamo struct {
 	AtendidoPor NullUUID   `json:"atendido_por" db:"atendido_por"`
 	CanalOrigen string     `json:"canal_origen" db:"canal_origen"`
 	DeletedAt   NullTime   `json:"deleted_at" db:"deleted_at"`
+
+	// Campo transiente (no es columna DB, se llena con JOIN en queries específicas)
+	NombreAtendidoPor string `json:"nombre_atendido_por,omitempty" db:"-"`
 }
 
 // Tipos de solicitud.

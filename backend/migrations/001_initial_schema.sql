@@ -69,7 +69,8 @@ DROP TABLE IF EXISTS configuracion_tenant CASCADE;
 DROP TABLE IF EXISTS asistente_mensajes CASCADE;
 DROP TABLE IF EXISTS asistente_conversaciones CASCADE;
 DROP TABLE IF EXISTS canales_whatsapp CASCADE;
-
+DROP TABLE IF EXISTS solicitudes_asesor CASCADE;
+DROP TABLE IF EXISTS mensajes_atencion CASCADE;
 -- =============================================================================
 -- 1. PLANES DE SUSCRIPCIÓN
 -- =============================================================================
@@ -86,15 +87,18 @@ CREATE TABLE planes (
     nombre                  STRING NOT NULL,          -- "Plan Demo", "Plan Bronze"...
     descripcion             STRING,
 
-    -- Precios (en soles S/)
+-- Precios (en soles S/)
     precio_mensual          DECIMAL(10, 2) NOT NULL DEFAULT 0,
     precio_anual            DECIMAL(10, 2),           -- NULL = no disponible anual
+    precio_sede_extra       DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- Precio mensual por sede adicional
+    precio_usuario_extra    DECIMAL(10, 2) NOT NULL DEFAULT 0,   -- Precio mensual por usuario adicional
 
-    -- === Límites de recursos ===
+-- === Límites de recursos ===
     max_sedes               INT NOT NULL DEFAULT 1,
     max_usuarios            INT NOT NULL DEFAULT 1,
     max_reclamos_mes        INT NOT NULL DEFAULT 50,  -- -1 = ilimitado
     max_chatbots            INT NOT NULL DEFAULT 0,
+    max_canales_whatsapp    INT NOT NULL DEFAULT 0,   -- -1 = ilimitado, 0 = no disponible
 
     -- === Funcionalidades habilitadas ===
     permite_chatbot         BOOL NOT NULL DEFAULT false,
@@ -105,6 +109,8 @@ CREATE TABLE planes (
     permite_api             BOOL NOT NULL DEFAULT false,
     permite_marca_blanca    BOOL NOT NULL DEFAULT false,  -- Quitar branding de la plataforma
     permite_multi_idioma    BOOL NOT NULL DEFAULT false,
+    permite_asistente_ia    BOOL NOT NULL DEFAULT false,  -- Asistente IA interno del panel
+    permite_atencion_vivo   BOOL NOT NULL DEFAULT false,  -- Chat en vivo con asesores
 
     -- Almacenamiento de adjuntos
     max_storage_mb          INT NOT NULL DEFAULT 100,     -- MB totales para adjuntos
@@ -215,6 +221,7 @@ CREATE TABLE suscripciones (
     override_max_usuarios   INT,
     override_max_reclamos   INT,
     override_max_chatbots   INT,
+    override_max_canales_whatsapp INT,
     override_max_storage_mb INT,
 
     -- Metadata de pago (referencia externa)
@@ -974,16 +981,24 @@ CREATE VIEW v_uso_tenant AS
 SELECT
     ct.tenant_id,
     -- Plan actual
+    p.id                                        AS plan_id,
     p.codigo                                    AS plan_codigo,
     p.nombre                                    AS plan_nombre,
+    s.id                                        AS suscripcion_id,
     s.estado                                    AS suscripcion_estado,
+    s.ciclo                                     AS suscripcion_ciclo,
+    s.es_trial                                  AS suscripcion_es_trial,
+    s.fecha_inicio                              AS suscripcion_fecha_inicio,
     s.fecha_fin                                 AS suscripcion_fecha_fin,
-    -- Límites (override > plan)
-    COALESCE(s.override_max_sedes, p.max_sedes)             AS limite_sedes,
-    COALESCE(s.override_max_usuarios, p.max_usuarios)       AS limite_usuarios,
-    COALESCE(s.override_max_reclamos, p.max_reclamos_mes)   AS limite_reclamos_mes,
-    COALESCE(s.override_max_chatbots, p.max_chatbots)       AS limite_chatbots,
-    COALESCE(s.override_max_storage_mb, p.max_storage_mb)   AS limite_storage_mb,
+    s.fecha_fin_trial                           AS suscripcion_fecha_fin_trial,
+    s.fecha_proximo_cobro                       AS suscripcion_proximo_cobro,
+    -- Límites efectivos (override > plan, -1 = ilimitado)
+    COALESCE(s.override_max_sedes, p.max_sedes)                         AS limite_sedes,
+    COALESCE(s.override_max_usuarios, p.max_usuarios)                   AS limite_usuarios,
+    COALESCE(s.override_max_reclamos, p.max_reclamos_mes)               AS limite_reclamos_mes,
+    COALESCE(s.override_max_chatbots, p.max_chatbots)                   AS limite_chatbots,
+    COALESCE(s.override_max_canales_whatsapp, p.max_canales_whatsapp)   AS limite_canales_whatsapp,
+    COALESCE(s.override_max_storage_mb, p.max_storage_mb)               AS limite_storage_mb,
     -- Funcionalidades
     p.permite_chatbot,
     p.permite_whatsapp,
@@ -992,17 +1007,22 @@ SELECT
     p.permite_exportar_excel,
     p.permite_api,
     p.permite_marca_blanca,
-    -- Uso actual (subqueries correlacionadas)
+    p.permite_multi_idioma,
+    p.permite_asistente_ia,
+    p.permite_atencion_vivo,
+    -- Uso actual
     (SELECT COUNT(*) FROM sedes sd
-     WHERE sd.tenant_id = ct.tenant_id AND sd.activo = true)    AS uso_sedes,
+     WHERE sd.tenant_id = ct.tenant_id AND sd.activo = true)                AS uso_sedes,
     (SELECT COUNT(*) FROM usuarios_admin ua
-     WHERE ua.tenant_id = ct.tenant_id AND ua.activo = true)    AS uso_usuarios,
+     WHERE ua.tenant_id = ct.tenant_id AND ua.activo = true)                AS uso_usuarios,
     (SELECT COUNT(*) FROM reclamos r
      WHERE r.tenant_id = ct.tenant_id
        AND r.deleted_at IS NULL
-       AND r.fecha_registro >= DATE_TRUNC('month', CURRENT_DATE))   AS uso_reclamos_mes,
+       AND r.fecha_registro >= DATE_TRUNC('month', CURRENT_DATE))           AS uso_reclamos_mes,
     (SELECT COUNT(*) FROM chatbots cb
-     WHERE cb.tenant_id = ct.tenant_id AND cb.activo = true)    AS uso_chatbots
+     WHERE cb.tenant_id = ct.tenant_id AND cb.activo = true)                AS uso_chatbots,
+    (SELECT COUNT(*) FROM canales_whatsapp cw
+     WHERE cw.tenant_id = ct.tenant_id AND cw.activo = true)               AS uso_canales_whatsapp
 FROM configuracion_tenant ct
 JOIN suscripciones s ON s.tenant_id = ct.tenant_id AND s.estado IN ('ACTIVA', 'TRIAL')
 JOIN planes p ON p.id = s.plan_id;
@@ -1011,43 +1031,55 @@ JOIN planes p ON p.id = s.plan_id;
 -- =============================================================================
 -- SEED DATA: Planes por defecto
 -- =============================================================================
-INSERT INTO planes (codigo, nombre, descripcion, precio_mensual, precio_anual,
-    max_sedes, max_usuarios, max_reclamos_mes, max_chatbots,
+INSERT INTO planes (
+    codigo, nombre, descripcion,
+    precio_mensual, precio_anual, precio_sede_extra, precio_usuario_extra,
+    max_sedes, max_usuarios, max_reclamos_mes, max_chatbots, max_canales_whatsapp,
     permite_chatbot, permite_whatsapp, permite_email,
-    permite_reportes_pdf, permite_exportar_excel, permite_api, permite_marca_blanca, permite_multi_idioma,
-    max_storage_mb, orden, destacado)
-VALUES
-    -- DEMO: Gratuito, para probar
-    ('DEMO', 'Plan Demo', 'Prueba gratuita por 15 días. Ideal para conocer la plataforma.',
-     0, NULL,
-     1, 1, 20, 0,
+    permite_reportes_pdf, permite_exportar_excel, permite_api,
+    permite_marca_blanca, permite_multi_idioma,
+    permite_asistente_ia, permite_atencion_vivo,
+    max_storage_mb, orden, activo, destacado
+) VALUES
+    ('DEMO', 'Plan Demo',
+     'Prueba gratuita por 15 días. Conoce todas las funcionalidades.',
+     0, NULL, 0, 0,
+     1, 1, 20, 0, 0,
      false, false, true,
-     false, false, false, false, false,
-     50, 1, false),
+     false, false, false,
+     false, false,
+     false, false,
+     50, 1, true, false),
 
-    -- BRONZE: Emprendedor
-    ('BRONZE', 'Plan Bronze', 'Para emprendedores y negocios pequeños con una sola sede.',
-     29.90, 299.00,
-     1, 3, 100, 0,
-     false, true, true,
-     true, false, false, false, false,
-     200, 2, false),
-
-    -- IRON: PYME
-    ('IRON', 'Plan Iron', 'Para PYMEs con varias sedes. Incluye chatbot IA y reportes.',
-     79.90, 799.00,
-     5, 10, 500, 1,
+    ('EMPRENDEDOR', 'Plan Emprendedor',
+     'Ideal para emprendedores y negocios pequeños con una sede.',
+     19.90, 179.90, 20.00, 15.00,
+     3, 1, -1, 1, 1,
      true, true, true,
-     true, true, true, false, false,
-     1000, 3, true),
+     true, true, false,
+     false, false,
+     true, true,
+     200, 2, true, false),
 
-    -- GOLD: Corporativo
-    ('GOLD', 'Plan Gold', 'Para empresas grandes. Sin límites operativos. Marca blanca incluida.',
-     199.90, 1999.00,
-     -1, -1, -1, 5,
+    ('PYME', 'Plan PYME',
+     'El favorito de las PYMEs. Múltiples sedes y usuarios.',
+     44.90, 449.90, 20.00, 10.00,
+     15, 5, -1, 2, 3,
      true, true, true,
-     true, true, true, true, true,
-     10000, 4, false);
+     true, true, true,
+     false, false,
+     true, true,
+     1000, 3, true, true),
+
+    ('PRO', 'Plan Pro',
+     'Para empresas establecidas. Sin límites operativos. Marca blanca incluida.',
+     84.90, 899.90, 15.00, 8.00,
+     50, 10, -1, 5, 10,
+     true, true, true,
+     true, true, true,
+     true, true,
+     true, true,
+     10000, 4, true, false);
 
 
 -- =============================================================================
@@ -1222,21 +1254,192 @@ CREATE TABLE IF NOT EXISTS canales_whatsapp (
     access_token        STRING      NOT NULL DEFAULT '',
     verify_token        STRING      NOT NULL DEFAULT '',
     nombre_canal        STRING      NOT NULL DEFAULT 'WhatsApp Principal',
+    chatbot_id          UUID,       -- FK al chatbot que define prompt/modelo/temperatura
     activo              BOOL        NOT NULL DEFAULT true,
     fecha_creacion      TIMESTAMPTZ NOT NULL DEFAULT now(),
     fecha_actualizacion TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     PRIMARY KEY (tenant_id, id),
 
+    CONSTRAINT fk_canal_wa_chatbot
+        FOREIGN KEY (tenant_id, chatbot_id)
+        REFERENCES chatbots (tenant_id, id)
+        ON DELETE SET NULL,
+
     UNIQUE INDEX idx_canal_wa_phone_activo (phone_number_id)
-        STORING (access_token, verify_token)
+        STORING (access_token, verify_token, chatbot_id)
         WHERE activo = true
 );
 
 -- Canales activos de un tenant (panel admin)
 CREATE INDEX IF NOT EXISTS idx_canal_wa_tenant ON canales_whatsapp (tenant_id)
-    STORING (phone_number_id, display_phone, nombre_canal, activo)
+    STORING (phone_number_id, display_phone, nombre_canal, chatbot_id, activo)
     WHERE activo = true;
+
+-- Canales vinculados a un chatbot específico
+CREATE INDEX IF NOT EXISTS idx_canal_wa_chatbot ON canales_whatsapp (tenant_id, chatbot_id)
+    WHERE chatbot_id IS NOT NULL AND activo = true;
+
+
+
+
+
+
+
+
+
+
+
+-- =============================================================================
+-- 18. SOLICITUDES DE ASESOR (Atención en Vivo)
+-- =============================================================================
+-- Registra cuando un usuario solicita hablar con un asesor humano.
+-- El bot de WhatsApp detecta la intención, recopila nombre/motivo,
+-- crea el registro con marcador >>>SOLICITAR_ASESOR:...<<<
+-- y el panel admin permite gestionarlas.
+--
+-- Flujo:
+--   1. Usuario dice "quiero hablar con un asesor" en WhatsApp
+--   2. Bot recopila nombre y motivo
+--   3. Bot emite marcador → backend inserta en esta tabla
+--   4. Panel admin muestra notificación con badge "Atención (N)"
+--   5. Asesor toma la solicitud → estado cambia a EN_ATENCION
+--   6. Asesor contacta al usuario por WhatsApp (botón "Abrir WhatsApp")
+--   7. Asesor marca como RESUELTO cuando termina
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS solicitudes_asesor (
+    tenant_id           UUID        NOT NULL,
+    id                  UUID        NOT NULL DEFAULT gen_random_uuid(),
+
+    -- Datos del solicitante
+    nombre              STRING      NOT NULL DEFAULT '',
+    telefono            STRING      NOT NULL,
+    motivo              STRING      NOT NULL DEFAULT '',
+
+    -- Canal de origen
+    canal_origen        STRING      NOT NULL DEFAULT 'WHATSAPP',
+    -- Valores: WHATSAPP | WEB | TELEFONO
+    canal_whatsapp_id   UUID,
+
+    -- Gestión interna
+    estado              STRING      NOT NULL DEFAULT 'PENDIENTE',
+    -- Valores: PENDIENTE | EN_ATENCION | RESUELTO | CANCELADO
+    prioridad           STRING      NOT NULL DEFAULT 'NORMAL',
+    -- Valores: BAJA | NORMAL | ALTA | URGENTE
+
+    asignado_a          UUID,
+    fecha_asignacion    TIMESTAMPTZ,
+    fecha_resolucion    TIMESTAMPTZ,
+    nota_interna        STRING      NOT NULL DEFAULT '',
+
+    -- Contexto de la conversación (resumen del bot antes de escalar)
+    resumen_conversacion STRING     NOT NULL DEFAULT '',
+
+    -- Auditoría
+    fecha_creacion      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    fecha_actualizacion TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tenant_id, id),
+
+    CONSTRAINT fk_solicitud_canal_wa
+        FOREIGN KEY (tenant_id, canal_whatsapp_id)
+        REFERENCES canales_whatsapp (tenant_id, id)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_solicitud_asesor
+        FOREIGN KEY (tenant_id, asignado_a)
+        REFERENCES usuarios_admin (tenant_id, id)
+        ON DELETE RESTRICT
+);
+
+-- Solicitudes pendientes de un tenant (vista principal del panel)
+CREATE INDEX IF NOT EXISTS idx_solicitud_asesor_pendientes
+    ON solicitudes_asesor (tenant_id, estado, fecha_creacion DESC)
+    STORING (nombre, telefono, motivo, canal_origen, prioridad, asignado_a)
+    WHERE estado IN ('PENDIENTE', 'EN_ATENCION');
+
+-- Solicitudes asignadas a un asesor específico
+CREATE INDEX IF NOT EXISTS idx_solicitud_asesor_asignado
+    ON solicitudes_asesor (tenant_id, asignado_a, estado)
+    WHERE asignado_a IS NOT NULL;
+
+-- Buscar por teléfono (evitar duplicados o ver historial)
+CREATE INDEX IF NOT EXISTS idx_solicitud_asesor_telefono
+    ON solicitudes_asesor (tenant_id, telefono, fecha_creacion DESC);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- =============================================================================
+-- 19. MENSAJES DE ATENCIÓN EN VIVO (Chat Asesor ↔ Cliente)
+-- =============================================================================
+-- Mensajes entre asesores y clientes durante una solicitud EN_ATENCION.
+-- El asesor escribe desde el panel → sale por el bot de WhatsApp.
+-- El cliente responde por WhatsApp → se guarda aquí en vez de ir a la IA.
+--
+-- Remitentes:
+--   CLIENTE → mensaje entrante del usuario por WhatsApp
+--   ASESOR  → mensaje saliente del asesor desde el panel
+--   SISTEMA → mensajes automáticos (handoff, transferencia, cierre)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS mensajes_atencion (
+    tenant_id       UUID        NOT NULL,
+    id              UUID        NOT NULL DEFAULT gen_random_uuid(),
+    solicitud_id    UUID        NOT NULL,
+
+    remitente       STRING      NOT NULL,
+    -- Valores: CLIENTE | ASESOR | SISTEMA
+
+    contenido       STRING      NOT NULL,
+    asesor_id       UUID,
+
+    fecha_envio     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tenant_id, id),
+
+    CONSTRAINT fk_msg_atencion_solicitud
+        FOREIGN KEY (tenant_id, solicitud_id)
+        REFERENCES solicitudes_asesor (tenant_id, id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_msg_atencion_asesor
+        FOREIGN KEY (tenant_id, asesor_id)
+        REFERENCES usuarios_admin (tenant_id, id)
+        ON DELETE CASCADE
+);
+
+-- Mensajes de una solicitud ordenados (query principal del chat)
+CREATE INDEX IF NOT EXISTS idx_msg_atencion_solicitud
+    ON mensajes_atencion (tenant_id, solicitud_id, fecha_envio ASC)
+    STORING (remitente, contenido, asesor_id);
+
+-- Mensajes recientes por tenant (monitoreo)
+CREATE INDEX IF NOT EXISTS idx_msg_atencion_recientes
+    ON mensajes_atencion (tenant_id, fecha_envio DESC)
+    STORING (solicitud_id, remitente);
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1249,5 +1452,7 @@ COMMENT ON TABLE asistente_conversaciones IS 'Conversaciones del asistente IA in
 COMMENT ON TABLE asistente_mensajes IS 'Mensajes de conversaciones del asistente. CASCADE delete con la conversación padre.';
 COMMENT ON COLUMN asistente_conversaciones.fecha_expiracion IS 'TTL de 7 días. CockroachDB elimina automáticamente las conversaciones viejas.';
 COMMENT ON COLUMN asistente_conversaciones.total_mensajes IS 'Contador actualizado por el backend. Máximo 50 mensajes por conversación.';
-COMMENT ON TABLE canales_whatsapp IS 'Mapeo phone_number_id → tenant para WhatsApp multi-tenant. Un número solo puede estar activo en un tenant a la vez.';
+COMMENT ON TABLE canales_whatsapp IS 'Mapeo phone_number_id → tenant para WhatsApp multi-tenant. chatbot_id vincula al chatbot que define prompt/modelo/temperatura. Si es NULL, usa config por defecto.';
 COMMENT ON COLUMN canales_whatsapp.access_token IS 'Token de Meta. En desarrollo va en plano, en producción encriptar con AES-256.';
+COMMENT ON TABLE solicitudes_asesor IS 'Solicitudes de atención humana desde WhatsApp u otro canal. El bot crea el registro; el panel admin permite gestionarlas.';
+COMMENT ON TABLE mensajes_atencion IS 'Chat en vivo entre asesor y cliente durante atención humana. Los mensajes del asesor salen por el bot de WhatsApp.';

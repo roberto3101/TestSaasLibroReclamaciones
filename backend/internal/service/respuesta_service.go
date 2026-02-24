@@ -69,7 +69,7 @@ func (s *RespuestaService) Crear(ctx context.Context, tenantID, reclamoID, userI
 	// 5. Cambiar estado a RESUELTO automáticamente si está pendiente o en proceso
 	estadoAnterior := reclamo.Estado
 	if estadoAnterior == model.EstadoPendiente || estadoAnterior == model.EstadoEnProceso {
-		_ = s.reclamoRepo.UpdateEstado(ctx, tenantID, reclamoID, model.EstadoResuelto)
+		_ = s.reclamoRepo.UpdateEstado(ctx, tenantID, reclamoID, model.EstadoResuelto, &userID)
 	}
 
 	// 6. Registrar historial de la respuesta

@@ -24,7 +24,7 @@ export function TablaSedes({ sedes, cargando, alRecargar, alEditar, tenantSlug }
   const obtenerUrlLibro = (sede: Sede): string => {
     if (!tenantSlug) return '';
     // Usamos window.location.origin para asegurar el dominio actual
-    return `${window.location.origin}/libro/${tenantSlug}`;
+    return `${window.location.origin}/libro/${tenantSlug}?sede=${sede.slug}`;
   };
 
   const copiarUrl = async (sede: Sede) => {
@@ -175,7 +175,7 @@ export function TablaSedes({ sedes, cargando, alRecargar, alEditar, tenantSlug }
                         sx={{ maxWidth: 120, display: 'block' }}
                         title={url}
                     >
-                        /libro/{tenantSlug}
+                        ?sede={row.original.slug}
                     </Typography>
                     
                     <Tooltip title={isCopied ? "Copiado" : "Copiar URL"}>

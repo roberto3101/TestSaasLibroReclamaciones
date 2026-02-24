@@ -72,7 +72,16 @@ func (ctrl *ChatbotController) Create(c *gin.Context) {
 
 	chatbot, err := ctrl.chatbotService.Create(
 		c.Request.Context(), tenantID,
-		req.Nombre, req.Tipo, req.Descripcion, userID,
+		service.CreateChatbotParams{
+			Nombre:             req.Nombre,
+			Tipo:               req.Tipo,
+			Descripcion:        req.Descripcion,
+			ModeloIA:           req.ModeloIA,
+			PromptSistema:      req.PromptSistema,
+			Temperatura:        req.Temperatura,
+			MaxTokensRespuesta: req.MaxTokensRespuesta,
+			CreadoPor:          userID,
+		},
 	)
 	if err != nil {
 		helper.Error(c, err)
@@ -106,6 +115,10 @@ func (ctrl *ChatbotController) Update(c *gin.Context) {
 		Tipo:                req.Tipo,
 		Descripcion:         req.Descripcion,
 		Activo:              req.Activo,
+		ModeloIA:            req.ModeloIA,
+		PromptSistema:       req.PromptSistema,
+		Temperatura:         req.Temperatura,
+		MaxTokensRespuesta:  req.MaxTokensRespuesta,
 		PuedeLeerReclamos:   req.PuedeLeerReclamos,
 		PuedeResponder:      req.PuedeResponder,
 		PuedeCambiarEstado:  req.PuedeCambiarEstado,

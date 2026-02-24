@@ -8,6 +8,12 @@ type CreateChatbotRequest struct {
 	Nombre      string `json:"nombre" binding:"required"`
 	Tipo        string `json:"tipo" binding:"required,oneof=ASISTENTE_IA WHATSAPP_BOT TELEGRAM_BOT CUSTOM"`
 	Descripcion string `json:"descripcion"`
+
+	// Config IA (opcionales al crear)
+	ModeloIA           string  `json:"modelo_ia"`
+	PromptSistema      string  `json:"prompt_sistema"`
+	Temperatura        float64 `json:"temperatura"`
+	MaxTokensRespuesta int     `json:"max_tokens_respuesta"`
 }
 
 type UpdateChatbotRequest struct {
@@ -15,6 +21,12 @@ type UpdateChatbotRequest struct {
 	Tipo        string `json:"tipo" binding:"required,oneof=ASISTENTE_IA WHATSAPP_BOT TELEGRAM_BOT CUSTOM"`
 	Descripcion string `json:"descripcion"`
 	Activo      bool   `json:"activo"`
+
+	// Config IA
+	ModeloIA           string  `json:"modelo_ia"`
+	PromptSistema      string  `json:"prompt_sistema"`
+	Temperatura        float64 `json:"temperatura"`
+	MaxTokensRespuesta int     `json:"max_tokens_respuesta"`
 
 	// Permisos (scopes)
 	PuedeLeerReclamos   bool `json:"puede_leer_reclamos"`

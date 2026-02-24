@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"libro-reclamaciones/internal/ai"
+	"libro-reclamaciones/internal/model"
 	"libro-reclamaciones/internal/model/dto"
 	"libro-reclamaciones/internal/repo"
 
@@ -16,18 +17,22 @@ import (
 )
 
 // WhatsAppService lógica de negocio del bot conversacional de WhatsApp.
-// Usa IA acotada al dominio de reclamos para entender lenguaje natural.
-// Mantiene memoria de conversación por usuario (TTL 15 minutos).
-// Cuando el usuario confirma los datos, registra el reclamo REAL en BD y envía correo.
 type WhatsAppService struct {
-	reclamoService *ReclamoService
-	tenantRepo     *repo.TenantRepo
-	canalWARepo    *repo.CanalWhatsAppRepo
-	iaProvider     ai.Provider
+	reclamoService         *ReclamoService
+	solicitudAsesorService *SolicitudAsesorService
+	mensajeAtencionService *MensajeAtencionService
+	tenantRepo             *repo.TenantRepo
+	canalWARepo            *repo.CanalWhatsAppRepo
+	chatbotRepo            *repo.ChatbotRepo
+	iaProvider             ai.Provider
 
 	// ── Memoria de conversación por teléfono ──
 	conversaciones   map[string]*conversacionWA
 	muConversaciones sync.RWMutex
+
+	// ── Throttle ACK para solicitudes en atención ──
+	ultimoACK   map[string]time.Time
+	muUltimoACK sync.RWMutex
 }
 
 // conversacionWA almacena el historial de mensajes de un usuario.
@@ -44,6 +49,9 @@ const (
 	// Marcador que la IA usa cuando tiene todos los datos confirmados
 	marcadorRegistro = ">>>REGISTRAR_RECLAMO:"
 	marcadorFin      = "<<<"
+
+	// Marcador para solicitar asesor humano
+	marcadorSolicitudAsesor = ">>>SOLICITAR_ASESOR:"
 )
 
 // datosReclamoWhatsApp estructura que la IA genera en JSON cuando el usuario confirma.
@@ -56,18 +64,31 @@ type datosReclamoWhatsApp struct {
 	Descripcion     string `json:"descripcion"`
 }
 
+// datosSolicitudAsesor estructura que la IA genera cuando el usuario quiere hablar con un asesor.
+type datosSolicitudAsesor struct {
+	Nombre string `json:"nombre"`
+	Motivo string `json:"motivo"`
+}
+
 func NewWhatsAppService(
 	reclamoService *ReclamoService,
+	solicitudAsesorService *SolicitudAsesorService,
+	mensajeAtencionService *MensajeAtencionService,
 	tenantRepo *repo.TenantRepo,
 	canalWARepo *repo.CanalWhatsAppRepo,
+	chatbotRepo *repo.ChatbotRepo,
 	iaProvider ai.Provider,
 ) *WhatsAppService {
 	svc := &WhatsAppService{
-		reclamoService: reclamoService,
-		tenantRepo:     tenantRepo,
-		canalWARepo:    canalWARepo,
-		iaProvider:     iaProvider,
-		conversaciones: make(map[string]*conversacionWA),
+		reclamoService:         reclamoService,
+		solicitudAsesorService: solicitudAsesorService,
+		mensajeAtencionService: mensajeAtencionService,
+		tenantRepo:             tenantRepo,
+		canalWARepo:            canalWARepo,
+		chatbotRepo:            chatbotRepo,
+		iaProvider:             iaProvider,
+		conversaciones:         make(map[string]*conversacionWA),
+		ultimoACK:              make(map[string]time.Time),
 	}
 
 	go svc.limpiarConversacionesExpiradas()
@@ -81,6 +102,8 @@ type CanalResuelto struct {
 	TenantID    uuid.UUID
 	AccessToken string
 	PhoneID     string
+	ChatbotID   *uuid.UUID // nil si no tiene chatbot vinculado
+	CanalID     uuid.UUID  // ID del canal WhatsApp (para FK en solicitud)
 }
 
 func (s *WhatsAppService) ResolverCanalPorPhoneNumberID(ctx context.Context, phoneNumberID string) (*CanalResuelto, error) {
@@ -92,17 +115,71 @@ func (s *WhatsAppService) ResolverCanalPorPhoneNumberID(ctx context.Context, pho
 		return nil, nil
 	}
 
-	return &CanalResuelto{
+	resuelto := &CanalResuelto{
 		TenantID:    canal.TenantID,
 		AccessToken: canal.AccessToken,
 		PhoneID:     canal.PhoneNumberID,
-	}, nil
+		CanalID:     canal.ID,
+	}
+
+	if canal.ChatbotID.Valid {
+		resuelto.ChatbotID = &canal.ChatbotID.UUID
+	}
+
+	return resuelto, nil
+}
+
+// ── Obtener configuración IA del chatbot vinculado ──────────────────────────
+
+type configIA struct {
+	PromptSistema string
+	MaxTokens     int
+}
+
+func (s *WhatsAppService) obtenerConfigIA(ctx context.Context, canal *CanalResuelto) configIA {
+	cfg := configIA{
+		MaxTokens: 600,
+	}
+
+	if canal.ChatbotID == nil {
+		return cfg
+	}
+
+	chatbot, err := s.chatbotRepo.GetByID(ctx, canal.TenantID, *canal.ChatbotID)
+	if err != nil || chatbot == nil || !chatbot.Activo {
+		fmt.Printf("[WhatsApp] Chatbot %s no encontrado o inactivo — usando defaults\n", canal.ChatbotID)
+		return cfg
+	}
+
+	if chatbot.PromptSistema.Valid && chatbot.PromptSistema.String != "" {
+		cfg.PromptSistema = chatbot.PromptSistema.String
+	}
+
+	if chatbot.MaxTokensRespuesta.Valid && chatbot.MaxTokensRespuesta.Int64 > 0 {
+		cfg.MaxTokens = int(chatbot.MaxTokensRespuesta.Int64)
+	}
+
+	return cfg
 }
 
 // ── Flujo principal con IA + memoria + registro real ────────────────────────
 
-func (s *WhatsAppService) ProcesarMensaje(ctx context.Context, tenantID uuid.UUID, telefono, textoUsuario string) string {
+func (s *WhatsAppService) ProcesarMensaje(ctx context.Context, canal *CanalResuelto, telefono, textoUsuario string) string {
+	tenantID := canal.TenantID
 	textoLimpio := strings.TrimSpace(textoUsuario)
+
+	// ── Check: ¿tiene solicitud EN_ATENCION? → desviar al panel con ACK ──
+	solActiva, _ := s.solicitudAsesorService.BuscarActivaPorTelefono(ctx, tenantID, telefono)
+	if solActiva != nil {
+		_ = s.mensajeAtencionService.GuardarMensajeCliente(ctx, tenantID, solActiva.ID, textoLimpio)
+		fmt.Printf("[WhatsApp] Mensaje de %s desviado al panel (solicitud %s)\n", telefono, solActiva.ID)
+
+		// ACK con throttle: solo 1 cada 5 minutos para no spamear
+		if s.debeEnviarACK(telefono) {
+			return "📩 Tu mensaje fue recibido. Un asesor lo verá en breve.\n\nSi necesitas algo urgente, escribe *urgente*."
+		}
+		return "" // Ya se envió ACK recientemente, silencio
+	}
 
 	// ── Validación: mensaje demasiado largo ──
 	if len([]rune(textoLimpio)) > 700 {
@@ -131,10 +208,15 @@ func (s *WhatsAppService) ProcesarMensaje(ctx context.Context, tenantID uuid.UUI
 	// Obtener contexto del tenant
 	contextoTenant := s.construirContextoTenant(ctx, tenantID)
 
+	// ── LEER CONFIG IA DEL CHATBOT VINCULADO ──
+	cfgIA := s.obtenerConfigIA(ctx, canal)
+
+	promptSistema := s.construirPromptSistemaWhatsApp(cfgIA.PromptSistema, contextoTenant)
+
 	respuestaIA, err := s.iaProvider.Chat(ctx, ai.ChatRequest{
-		SystemPrompt: s.construirPromptSistemaWhatsApp(contextoTenant),
+		SystemPrompt: promptSistema,
 		Messages:     historial,
-		MaxTokens:    600,
+		MaxTokens:    cfgIA.MaxTokens,
 	})
 
 	if err != nil {
@@ -148,6 +230,11 @@ func (s *WhatsAppService) ProcesarMensaje(ctx context.Context, tenantID uuid.UUI
 	// ── Detectar si la IA quiere registrar el reclamo ──
 	if strings.Contains(contenidoIA, marcadorRegistro) {
 		return s.procesarRegistroDesdeIA(ctx, tenantID, telefono, contenidoIA)
+	}
+
+	// ── Detectar si la IA quiere solicitar un asesor ──
+	if strings.Contains(contenidoIA, marcadorSolicitudAsesor) {
+		return s.procesarSolicitudAsesorDesdeIA(ctx, canal, telefono, contenidoIA)
 	}
 
 	// Respuesta normal conversacional
@@ -203,7 +290,6 @@ func (s *WhatsAppService) procesarRegistroDesdeIA(ctx context.Context, tenantID 
 	if tipoDoc == "" {
 		tipoDoc = "DNI"
 	}
-	// Mapear variaciones comunes
 	switch tipoDoc {
 	case "DNI", "CE", "RUC", "PASAPORTE":
 		// OK
@@ -222,23 +308,22 @@ func (s *WhatsAppService) procesarRegistroDesdeIA(ctx context.Context, tenantID 
 	// Construir el DTO
 	req := dto.CreateReclamoRequest{
 		TipoSolicitud:   "RECLAMO",
-		NombreCompleto:   strings.TrimSpace(datos.NombreCompleto),
-		TipoDocumento:    tipoDoc,
-		NumeroDocumento:  strings.TrimSpace(datos.NumeroDocumento),
-		Telefono:         telefonoReclamo,
-		Email:            strings.TrimSpace(datos.Email),
-		DescripcionBien:  strings.TrimSpace(datos.Descripcion),
-		FechaIncidente:   time.Now().Format("2006-01-02"),
-		DetalleReclamo:   strings.TrimSpace(datos.Descripcion),
+		NombreCompleto:  strings.TrimSpace(datos.NombreCompleto),
+		TipoDocumento:   tipoDoc,
+		NumeroDocumento: strings.TrimSpace(datos.NumeroDocumento),
+		Telefono:        telefonoReclamo,
+		Email:           strings.TrimSpace(datos.Email),
+		DescripcionBien: strings.TrimSpace(datos.Descripcion),
+		FechaIncidente:  time.Now().Format("2006-01-02"),
+		DetalleReclamo:  strings.TrimSpace(datos.Descripcion),
 		PedidoConsumidor: "Solución al problema reportado",
 	}
 
-	// ¡REGISTRAR EN BD! — esto genera código, calcula fecha límite, envía correos
+	// ¡REGISTRAR EN BD!
 	reclamo, err := s.reclamoService.CrearPublico(ctx, tenant.Slug, req, "whatsapp", "WhatsApp Bot")
 	if err != nil {
 		fmt.Printf("[WhatsApp] Error creando reclamo: %v\n", err)
 
-		// Verificar si es error de límite del plan
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "limite") || strings.Contains(errMsg, "plan") {
 			respuesta := "Lo sentimos, el negocio ha alcanzado el límite de reclamos de su plan actual. Por favor, comunícate directamente con la empresa. 📞"
@@ -251,7 +336,7 @@ func (s *WhatsAppService) procesarRegistroDesdeIA(ctx context.Context, tenantID 
 		return respuesta
 	}
 
-	// ¡ÉXITO! Construir respuesta con el código real
+	// ¡ÉXITO!
 	respuesta := fmt.Sprintf(
 		"✅ *¡Reclamo registrado exitosamente!*\n\n"+
 			"📋 *Código:* %s\n"+
@@ -270,10 +355,116 @@ func (s *WhatsAppService) procesarRegistroDesdeIA(ctx context.Context, tenantID 
 	fmt.Printf("[WhatsApp] ✅ Reclamo %s registrado por %s (tenant: %s)\n",
 		reclamo.CodigoReclamo, telefono, tenant.Slug)
 
-	// Guardar en historial y limpiar conversación (flujo completado)
 	s.agregarMensajeAlHistorial(telefono, tenantID, "assistant", respuesta)
-
 	return respuesta
+}
+
+// ── Solicitud de asesor humano desde IA ─────────────────────────────────────
+
+func (s *WhatsAppService) procesarSolicitudAsesorDesdeIA(ctx context.Context, canal *CanalResuelto, telefono, contenidoIA string) string {
+	tenantID := canal.TenantID
+
+	// Extraer JSON entre marcadores
+	inicio := strings.Index(contenidoIA, marcadorSolicitudAsesor)
+	fin := strings.Index(contenidoIA[inicio:], marcadorFin)
+
+	var datos datosSolicitudAsesor
+
+	if inicio != -1 && fin != -1 {
+		jsonStr := contenidoIA[inicio+len(marcadorSolicitudAsesor) : inicio+fin]
+		jsonStr = strings.TrimSpace(jsonStr)
+
+		if err := json.Unmarshal([]byte(jsonStr), &datos); err != nil {
+			fmt.Printf("[WhatsApp] Error parseando JSON solicitud asesor: %v — JSON: %s\n", err, jsonStr)
+		}
+	}
+
+	// Defaults si la IA no pudo extraer datos
+	if datos.Nombre == "" {
+		datos.Nombre = "Cliente WhatsApp"
+	}
+	if datos.Motivo == "" {
+		datos.Motivo = "Solicitud de atención personalizada"
+	}
+
+	// Construir resumen de la conversación (últimos mensajes)
+	resumen := s.construirResumenConversacion(telefono)
+
+	// Crear la solicitud en BD
+	params := CrearSolicitudParams{
+		Nombre:              strings.TrimSpace(datos.Nombre),
+		Telefono:            telefono,
+		Motivo:              strings.TrimSpace(datos.Motivo),
+		CanalOrigen:         model.CanalOrigenWhatsApp,
+		CanalWhatsAppID:     &canal.CanalID,
+		Prioridad:           model.PrioridadNormal,
+		ResumenConversacion: resumen,
+	}
+
+	solicitud, err := s.solicitudAsesorService.Crear(ctx, tenantID, params)
+	if err != nil {
+		fmt.Printf("[WhatsApp] Error creando solicitud asesor: %v\n", err)
+
+		// Si ya tiene una solicitud abierta, informar
+		if strings.Contains(err.Error(), "abierta") {
+			respuesta := "Ya tienes una solicitud de atención pendiente. Un asesor se comunicará contigo pronto. ⏳\n\nSi necesitas algo más mientras tanto, puedo ayudarte con reclamos. 😊"
+			s.agregarMensajeAlHistorial(telefono, tenantID, "assistant", respuesta)
+			return respuesta
+		}
+
+		respuesta := "Hubo un problema al registrar tu solicitud. Por favor, intenta de nuevo en unos minutos. 🙏"
+		s.agregarMensajeAlHistorial(telefono, tenantID, "assistant", respuesta)
+		return respuesta
+	}
+
+	fmt.Printf("[WhatsApp] 📞 Solicitud asesor creada (ID: %s) por %s — %s (tenant: %s)\n",
+		solicitud.ID, telefono, datos.Nombre, tenantID)
+
+	// Extraer el mensaje visible (antes del marcador) o generar uno
+	mensajeVisible := ""
+	if inicio > 0 {
+		mensajeVisible = strings.TrimSpace(contenidoIA[:inicio])
+	}
+	if mensajeVisible == "" {
+		mensajeVisible = fmt.Sprintf(
+			"✅ *Solicitud registrada, %s*\n\n"+
+				"Un asesor revisará tu caso y se comunicará contigo por este mismo WhatsApp lo antes posible. 📱\n\n"+
+				"Mientras tanto, si necesitas registrar un reclamo formal, puedo ayudarte con eso. 😊",
+			datos.Nombre,
+		)
+	} else {
+		mensajeVisible = limpiarMarkdownParaWhatsApp(mensajeVisible)
+	}
+
+	s.agregarMensajeAlHistorial(telefono, tenantID, "assistant", mensajeVisible)
+	return mensajeVisible
+}
+
+// construirResumenConversacion genera un resumen legible de los últimos mensajes.
+func (s *WhatsAppService) construirResumenConversacion(telefono string) string {
+	s.muConversaciones.RLock()
+	defer s.muConversaciones.RUnlock()
+
+	convo, existe := s.conversaciones[telefono]
+	if !existe || len(convo.mensajes) == 0 {
+		return ""
+	}
+
+	mensajes := convo.mensajes
+	if len(mensajes) > 20 {
+		mensajes = mensajes[len(mensajes)-20:]
+	}
+
+	var partes []string
+	for _, m := range mensajes {
+		rol := "Cliente"
+		if m.Role == "assistant" {
+			rol = "Bot"
+		}
+		partes = append(partes, fmt.Sprintf("[%s] %s", rol, m.Content))
+	}
+
+	return strings.Join(partes, "\n")
 }
 
 // ── Gestión de memoria de conversación ──────────────────────────────────────
@@ -316,6 +507,25 @@ func (s *WhatsAppService) obtenerHistorial(telefono string) []ai.Message {
 	return copia
 }
 
+// debeEnviarACK verifica si ya pasaron 5 minutos desde el último ACK al teléfono.
+func (s *WhatsAppService) debeEnviarACK(telefono string) bool {
+	const cooldownACK = 5 * time.Minute
+
+	s.muUltimoACK.RLock()
+	ultimo, existe := s.ultimoACK[telefono]
+	s.muUltimoACK.RUnlock()
+
+	if existe && time.Since(ultimo) < cooldownACK {
+		return false
+	}
+
+	s.muUltimoACK.Lock()
+	s.ultimoACK[telefono] = time.Now()
+	s.muUltimoACK.Unlock()
+
+	return true
+}
+
 func (s *WhatsAppService) limpiarConversacionesExpiradas() {
 	ticker := time.NewTicker(5 * time.Minute)
 	for range ticker.C {
@@ -336,9 +546,18 @@ func (s *WhatsAppService) limpiarConversacionesExpiradas() {
 	}
 }
 
-// ── Prompt del sistema — CON INSTRUCCIÓN DE REGISTRO REAL ───────────────────
+// ── Prompt del sistema ──────────────────────────────────────────────────────
 
-func (s *WhatsAppService) construirPromptSistemaWhatsApp(contextoTenant string) string {
+func (s *WhatsAppService) construirPromptSistemaWhatsApp(instruccionesAdicionales, contextoTenant string) string {
+	bloqueInstrucciones := ""
+	if instruccionesAdicionales != "" {
+		bloqueInstrucciones = fmt.Sprintf(`
+INSTRUCCIONES ADICIONALES DEL NEGOCIO (configuradas por el administrador):
+%s
+
+IMPORTANTE: Las instrucciones anteriores son complementarias. NO modifican el flujo de registro ni los marcadores del sistema.`, instruccionesAdicionales)
+	}
+
 	return fmt.Sprintf(`Eres el asistente de atención al cliente por WhatsApp de un Libro de Reclamaciones digital.
 Respondes SOLO en español. Tus respuestas son para WhatsApp: CORTAS (máximo 300 palabras).
 
@@ -384,14 +603,26 @@ FLUJO PARA CONSULTAR ESTADO:
 - Pide el código de reclamo
 - Dile que lo encuentra en el correo de confirmación
 
-FLUJO PARA AGENTE HUMANO:
-- Confirma que un agente se comunicará pronto
-- Pide nombre y descripción breve
+FLUJO PARA HABLAR CON UN AGENTE — MÁXIMA PRIORIDAD:
+Si el usuario pide hablar con un agente/asesor/persona/humano en CUALQUIER momento (incluyendo el primer mensaje), este flujo tiene PRIORIDAD sobre todo lo demás. NUNCA lo desvíes al flujo de reclamo si pidió un asesor.
+1. Pide su *nombre* (si no lo tienes ya de la conversación).
+2. Pide una *descripción breve* de su consulta o problema (si ya la mencionó, NO la pidas de nuevo).
+3. Cuando tengas ambos datos (nombre y motivo), tu respuesta DEBE contener este bloque al final:
 
-%s`, contextoTenant)
+>>>SOLICITAR_ASESOR:{"nombre":"Jose Roberto La Rosa Ledezma","motivo":"Mi gato vino sin baterias y quiero hablar con alguien"}<<<
+
+REGLAS DEL BLOQUE DE SOLICITUD ASESOR:
+- El JSON debe ser válido, en UNA sola línea, sin saltos de línea dentro.
+- "nombre": el nombre que el usuario proporcionó.
+- "motivo": resumen breve del problema o consulta del usuario.
+- ANTES del bloque, escribe un mensaje amable como "Perfecto, estoy registrando tu solicitud para que un asesor te contacte... ⏳"
+- El bloque >>>SOLICITAR_ASESOR:...<<< NO será visible para el usuario, el sistema lo intercepta.
+- Si el usuario ya dio su nombre y motivo en la conversación, NO los pidas de nuevo. Usa los datos que ya tienes.
+- NUNCA omitas el bloque cuando tengas nombre y motivo. SIEMPRE emítelo.
+%s
+%s`, bloqueInstrucciones, contextoTenant)
 }
 
-// construirContextoTenant agrega info del negocio al prompt.
 func (s *WhatsAppService) construirContextoTenant(ctx context.Context, tenantID uuid.UUID) string {
 	tenant, err := s.tenantRepo.GetByTenantID(ctx, tenantID)
 	if err != nil || tenant == nil {

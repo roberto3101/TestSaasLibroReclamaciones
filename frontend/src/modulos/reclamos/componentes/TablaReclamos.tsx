@@ -130,6 +130,19 @@ export function TablaReclamos({ reclamos, total, pagina, cargando, alCambiarPagi
         },
       },
       {
+        accessorKey: 'nombre_atendido_por',
+        header: 'Atendido por',
+        size: 150,
+        Cell: ({ cell }) => {
+          const nombre = cell.getValue<string>();
+          return (
+            <Typography variant="body2" sx={{ color: nombre ? '#374151' : '#9ca3af', fontSize: '13px' }}>
+              {nombre || '—'}
+            </Typography>
+          );
+        },
+      },
+      {
         accessorKey: 'fecha_registro',
         header: 'Fecha',
         size: 160,

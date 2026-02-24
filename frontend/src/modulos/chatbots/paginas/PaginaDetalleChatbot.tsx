@@ -246,9 +246,11 @@ export default function PaginaDetalleChatbot() {
                 </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Temperatura</Typography>
-                  <Typography variant="body2" fontWeight={600}>{chatbot.temperatura && typeof chatbot.temperatura === 'object' 
-  ? (chatbot.temperatura as any).Valid ? (chatbot.temperatura as any).Float64 : 'N/A'
-  : chatbot.temperatura ?? 'N/A'}</Typography>
+                  <Typography variant="body2" fontWeight={600}>{
+                    chatbot.temperatura != null && typeof chatbot.temperatura === 'object'
+                      ? ((chatbot.temperatura as any).Valid ? (chatbot.temperatura as any).Float64 : 'N/A')
+                      : (chatbot.temperatura ?? 'N/A')
+                  }</Typography>
                 </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Requiere aprobación</Typography>

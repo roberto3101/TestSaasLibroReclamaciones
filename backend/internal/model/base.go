@@ -47,14 +47,41 @@ func (nt NullTime) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + nt.Time.Format(time.RFC3339) + `"`), nil
 }
 
-// NullInt64 alias para campos numéricos opcionales.
-type NullInt64 = sql.NullInt64
+// NullInt64 wrapper de sql.NullInt64 con serialización JSON correcta.
+type NullInt64 struct {
+	sql.NullInt64
+}
 
-// NullFloat64 alias para campos decimales opcionales.
-type NullFloat64 = sql.NullFloat64
+func (ni NullInt64) MarshalJSON() ([]byte, error) {
+	if !ni.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(ni.Int64)
+}
 
-// NullBool alias para campos booleanos opcionales.
-type NullBool = sql.NullBool
+// NullFloat64 wrapper de sql.NullFloat64 con serialización JSON correcta.
+type NullFloat64 struct {
+	sql.NullFloat64
+}
+
+func (nf NullFloat64) MarshalJSON() ([]byte, error) {
+	if !nf.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(nf.Float64)
+}
+
+// NullBool wrapper de sql.NullBool con serialización JSON correcta.
+type NullBool struct {
+	sql.NullBool
+}
+
+func (nb NullBool) MarshalJSON() ([]byte, error) {
+	if !nb.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(nb.Bool)
+}
 
 // NullUUID representa un UUID que puede ser NULL.
 type NullUUID struct {

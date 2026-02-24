@@ -4,8 +4,8 @@ import (
 	"libro-reclamaciones/internal/apperror"
 	"libro-reclamaciones/internal/helper"
 	"libro-reclamaciones/internal/repo"
-
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type DashboardController struct {
@@ -34,4 +34,27 @@ func (ctrl *DashboardController) GetUso(c *gin.Context) {
 		return
 	}
 	helper.Success(c, uso)
+}
+
+// GetMetricas GET /api/v1/dashboard/metricas
+func (ctrl *DashboardController) GetMetricas(c *gin.Context) {
+	tenantID, err := helper.GetTenantID(c)
+	if err != nil {
+		helper.Error(c, err)
+		return
+	}
+
+	var sedeID *uuid.UUID
+	if sedeParam := c.Query("sede_id"); sedeParam != "" {
+		if parsed, err := uuid.Parse(sedeParam); err == nil {
+			sedeID = &parsed
+		}
+	}
+
+	metricas, err := ctrl.dashboardRepo.GetMetricas(c.Request.Context(), tenantID, sedeID)
+	if err != nil {
+		helper.Error(c, err)
+		return
+	}
+	helper.Success(c, metricas)
 }

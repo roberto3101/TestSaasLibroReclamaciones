@@ -1,6 +1,8 @@
 package controller
 
 import (
+
+	"time"
 	"libro-reclamaciones/internal/helper"
 	"libro-reclamaciones/internal/model/dto"
 	"libro-reclamaciones/internal/service"
@@ -26,12 +28,53 @@ func (ctrl *ReclamoController) GetAll(c *gin.Context) {
 	}
 
 	pag := helper.ParsePagination(c)
-	reclamos, total, err := ctrl.reclamoService.GetByTenant(c.Request.Context(), tenantID, pag)
+
+	var sedeID *uuid.UUID
+	if sedeParam := c.Query("sede_id"); sedeParam != "" {
+		if parsed, err := uuid.Parse(sedeParam); err == nil {
+			sedeID = &parsed
+		}
+	}
+
+	var fechaDesde, fechaHasta *time.Time
+
+	switch c.Query("periodo") {
+	case "hoy":
+		t := inicioDelDiaReclamo(time.Now())
+		fechaDesde = &t
+	case "semana":
+		t := inicioDelDiaReclamo(time.Now().AddDate(0, 0, -int(time.Now().Weekday())+1))
+		fechaDesde = &t
+	case "mes":
+		t := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Local)
+		fechaDesde = &t
+	case "anio":
+		t := time.Date(time.Now().Year(), 1, 1, 0, 0, 0, 0, time.Local)
+		fechaDesde = &t
+	}
+
+	if desde := c.Query("fecha_desde"); desde != "" {
+		if t, err := time.Parse("2006-01-02", desde); err == nil {
+			fechaDesde = &t
+		}
+	}
+	if hasta := c.Query("fecha_hasta"); hasta != "" {
+		if t, err := time.Parse("2006-01-02", hasta); err == nil {
+			fin := t.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			fechaHasta = &fin
+		}
+	}
+
+	reclamos, total, err := ctrl.reclamoService.GetByTenant(c.Request.Context(), tenantID, pag, sedeID, fechaDesde, fechaHasta)
 	if err != nil {
 		helper.Error(c, err)
 		return
 	}
 	helper.Success(c, dto.NewPaginatedResponse(reclamos, total, pag.Page, pag.PerPage))
+}
+
+func inicioDelDiaReclamo(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // GetByID GET /api/v1/reclamos/:id

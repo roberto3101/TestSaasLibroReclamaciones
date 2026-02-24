@@ -166,10 +166,10 @@ func (ctrl *SedeController) mapCreateToModel(tenantID uuid.UUID, req *dto.Create
 
 	// Latitud / Longitud con punteros
 	if req.Latitud != nil && *req.Latitud >= -90 && *req.Latitud <= 90 {
-		sede.Latitud = model.NullFloat64{Float64: *req.Latitud, Valid: true}
+		sede.Latitud = model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: *req.Latitud, Valid: true}}
 	}
 	if req.Longitud != nil && *req.Longitud >= -180 && *req.Longitud <= 180 {
-		sede.Longitud = model.NullFloat64{Float64: *req.Longitud, Valid: true}
+		sede.Longitud = model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: *req.Longitud, Valid: true}}
 	}
 
 	return sede
@@ -197,10 +197,10 @@ func (ctrl *SedeController) mapUpdateToModel(tenantID uuid.UUID, sedeID uuid.UUI
 	sede.HorarioAtencion = marshalHorario(req.HorarioAtencion)
 
 	if req.Latitud != nil && *req.Latitud >= -90 && *req.Latitud <= 90 {
-		sede.Latitud = model.NullFloat64{Float64: *req.Latitud, Valid: true}
+		sede.Latitud = model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: *req.Latitud, Valid: true}}
 	}
 	if req.Longitud != nil && *req.Longitud >= -180 && *req.Longitud <= 180 {
-		sede.Longitud = model.NullFloat64{Float64: *req.Longitud, Valid: true}
+		sede.Longitud = model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: *req.Longitud, Valid: true}}
 	}
 
 	return sede

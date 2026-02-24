@@ -2,8 +2,11 @@ import axios from 'axios';
 import { notificar } from './toast';
 
 export function manejarError(error: unknown, mensajeFallback = 'Ocurrió un error inesperado'): string {
+  // Si el interceptor de http.ts ya mostró un modal de plan, no mostrar toast
+  if (axios.isCancel(error)) return '';
+
   if (axios.isAxiosError(error)) {
-   const raw = error.response?.data?.error ?? error.response?.data?.message ?? error.message;
+    const raw = error.response?.data?.error ?? error.response?.data?.message ?? error.message;
     const mensaje = typeof raw === 'string' ? raw : (raw?.message ?? mensajeFallback);
     notificar.error(mensaje);
     return mensaje;

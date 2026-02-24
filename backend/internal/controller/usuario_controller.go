@@ -135,6 +135,33 @@ func (ctrl *UsuarioController) ChangePassword(c *gin.Context) {
 	helper.Success(c, gin.H{"message": "Contraseña actualizada"})
 }
 
+// AdminResetPassword PATCH /api/v1/usuarios/:id/password
+func (ctrl *UsuarioController) AdminResetPassword(c *gin.Context) {
+	tenantID, err := helper.GetTenantID(c)
+	if err != nil {
+		helper.Error(c, err)
+		return
+	}
+
+	userID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		helper.ValidationError(c, "ID inválido")
+		return
+	}
+
+	var req dto.AdminResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		helper.ValidationError(c, "password es obligatorio (mínimo 8 caracteres)")
+		return
+	}
+
+	if err := ctrl.usuarioService.AdminResetPassword(c.Request.Context(), tenantID, userID, req.Password); err != nil {
+		helper.Error(c, err)
+		return
+	}
+	helper.Success(c, gin.H{"message": "Contraseña actualizada"})
+}
+
 // Deactivate DELETE /api/v1/usuarios/:id
 func (ctrl *UsuarioController) Deactivate(c *gin.Context) {
 	tenantID, err := helper.GetTenantID(c)

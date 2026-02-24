@@ -43,9 +43,19 @@ func NewReclamoService(
 	}
 }
 
-func (s *ReclamoService) GetByTenant(ctx context.Context, tenantID uuid.UUID, pag dto.PaginationRequest) ([]model.Reclamo, int, error) {
-	return s.reclamoRepo.GetByTenant(ctx, tenantID, pag)
+func (s *ReclamoService) GetByTenant(ctx context.Context, tenantID uuid.UUID, pag dto.PaginationRequest, sedeID *uuid.UUID, fechaDesde, fechaHasta *time.Time) ([]model.Reclamo, int, error) {
+	return s.reclamoRepo.GetByTenant(ctx, tenantID, pag, sedeID, fechaDesde, fechaHasta)
 }
+
+
+
+
+
+func (s *ReclamoService) ObtenerParaExportacion(ctx context.Context, filtros repo.FiltrosExportacion) ([]model.Reclamo, error) {
+	return s.reclamoRepo.ObtenerParaExportacion(ctx, filtros)
+}
+
+
 
 func (s *ReclamoService) GetByCodigoPublico(ctx context.Context, tenantID uuid.UUID, codigo string) (*model.Reclamo, error) {
 	return s.reclamoRepo.GetByCodigoPublico(ctx, tenantID, codigo)
@@ -130,7 +140,7 @@ func (s *ReclamoService) CrearPublico(ctx context.Context, tenantSlug string, re
 		DireccionProveedor:   model.NullString{NullString: sql.NullString{String: tenant.DireccionLegal.String, Valid: tenant.DireccionLegal.Valid}},
 
 		TipoBien:        model.NullString{NullString: sql.NullString{String: req.TipoBien, Valid: req.TipoBien != ""}},
-		MontoReclamado:  model.NullFloat64{Float64: req.MontoReclamado, Valid: req.MontoReclamado > 0},
+		MontoReclamado:  model.NullFloat64{NullFloat64: sql.NullFloat64{Float64: req.MontoReclamado, Valid: req.MontoReclamado > 0}},
 		DescripcionBien: req.DescripcionBien,
 		NumeroPedido:    model.NullString{NullString: sql.NullString{String: req.NumeroPedido, Valid: req.NumeroPedido != ""}},
 
@@ -219,7 +229,7 @@ func (s *ReclamoService) CambiarEstado(ctx context.Context, tenantID, reclamoID,
 
 	estadoAnterior := reclamo.Estado
 
-	if err := s.reclamoRepo.UpdateEstado(ctx, tenantID, reclamoID, nuevoEstado); err != nil {
+	if err := s.reclamoRepo.UpdateEstado(ctx, tenantID, reclamoID, nuevoEstado, &userID); err != nil {
 		return fmt.Errorf("reclamo_service.CambiarEstado update: %w", err)
 	}
 

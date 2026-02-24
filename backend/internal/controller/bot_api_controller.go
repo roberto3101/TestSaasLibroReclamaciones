@@ -45,7 +45,7 @@ func (ctrl *BotAPIController) GetReclamos(c *gin.Context) {
 	}
 
 	pag := helper.ParsePagination(c)
-	reclamos, total, err := ctrl.reclamoService.GetByTenant(c.Request.Context(), tenantID, pag)
+	reclamos, total, err := ctrl.reclamoService.GetByTenant(c.Request.Context(), tenantID, pag, nil, nil, nil)
 	if err != nil {
 		ctrl.logRequest(c, start, 500, err.Error())
 		helper.Error(c, err)
@@ -177,7 +177,7 @@ func (ctrl *BotAPIController) logRequest(c *gin.Context, start time.Time, status
 		Metodo:      c.Request.Method,
 		StatusCode:  statusCode,
 		IPAddress:   model.NullString{NullString: sql.NullString{String: helper.GetClientIP(c), Valid: true}},
-		DuracionMS:  model.NullInt64{Int64: duracion, Valid: duracion > 0},
+		DuracionMS:  model.NullInt64{NullInt64: sql.NullInt64{Int64: duracion, Valid: duracion > 0}},
 		Accion:      model.NullString{NullString: sql.NullString{String: errorDetalle, Valid: errorDetalle != ""}},
 	}
 

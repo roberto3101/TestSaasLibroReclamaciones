@@ -11,6 +11,9 @@ export const usuariosApi = {
   actualizar: (id: string, datos: ActualizarUsuarioRequest) =>
     http.put<ApiResponse<void>>(`/usuarios/${id}`, datos).then((r) => r.data),
 
-  eliminar: (id: string) =>
+ eliminar: (id: string) =>
     http.delete<ApiResponse<void>>(`/usuarios/${id}`).then((r) => r.data),
+
+  cambiarPassword: (id: string, password: string) =>
+    http.patch<ApiResponse<void>>(`/usuarios/${id}/password`, { password }).then((r) => r.data),
 };

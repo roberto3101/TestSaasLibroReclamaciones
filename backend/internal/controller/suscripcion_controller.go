@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+
 	"libro-reclamaciones/internal/helper"
 	"libro-reclamaciones/internal/service"
 
@@ -9,73 +11,110 @@ import (
 
 type SuscripcionController struct {
 	suscripcionService *service.SuscripcionService
+	limitesService     *service.LimitesService
 }
 
-func NewSuscripcionController(suscripcionService *service.SuscripcionService) *SuscripcionController {
-	return &SuscripcionController{suscripcionService: suscripcionService}
+func NewSuscripcionController(suscripcionService *service.SuscripcionService, limitesService *service.LimitesService) *SuscripcionController {
+	return &SuscripcionController{
+		suscripcionService: suscripcionService,
+		limitesService:     limitesService,
+	}
 }
 
-// GetActiva GET /api/v1/suscripcion
-func (ctrl *SuscripcionController) GetActiva(c *gin.Context) {
-	tenantID, err := helper.GetTenantID(c)
+// GetActiva retorna la suscripción activa del tenant con datos del plan.
+// GET /api/v1/suscripcion
+func (c *SuscripcionController) GetActiva(ctx *gin.Context) {
+	tenantID, err := helper.GetTenantID(ctx)
 	if err != nil {
-		helper.Error(c, err)
+		helper.Error(ctx, err)
 		return
 	}
 
-	sus, err := ctrl.suscripcionService.GetActiva(c.Request.Context(), tenantID)
+	data, err := c.suscripcionService.GetActivaConPlan(ctx.Request.Context(), tenantID)
 	if err != nil {
-		helper.Error(c, err)
+		helper.Error(ctx, err)
 		return
 	}
-	helper.Success(c, sus)
+
+	helper.Success(ctx, data)
 }
 
-// GetHistorial GET /api/v1/suscripcion/historial
-func (ctrl *SuscripcionController) GetHistorial(c *gin.Context) {
-	tenantID, err := helper.GetTenantID(c)
+// GetUso retorna el uso actual del tenant vs límites del plan.
+// GET /api/v1/suscripcion/uso
+func (c *SuscripcionController) GetUso(ctx *gin.Context) {
+	tenantID, err := helper.GetTenantID(ctx)
 	if err != nil {
-		helper.Error(c, err)
+		helper.Error(ctx, err)
 		return
 	}
 
-	historial, err := ctrl.suscripcionService.GetHistorial(c.Request.Context(), tenantID)
+	uso, err := c.limitesService.ObtenerUso(ctx.Request.Context(), tenantID)
 	if err != nil {
-		helper.Error(c, err)
+		helper.Error(ctx, err)
 		return
 	}
-	helper.Success(c, historial)
+
+	helper.Success(ctx, uso)
 }
 
-// CambiarPlan body de la request.
-type cambiarPlanRequest struct {
-	PlanCodigo     string `json:"plan_codigo" binding:"required"`
-	Ciclo          string `json:"ciclo"`
-	ReferenciaPago string `json:"referencia_pago"`
-	MetodoPago     string `json:"metodo_pago"`
+// GetHistorial retorna el historial de suscripciones del tenant.
+// GET /api/v1/suscripcion/historial
+func (c *SuscripcionController) GetHistorial(ctx *gin.Context) {
+	tenantID, err := helper.GetTenantID(ctx)
+	if err != nil {
+		helper.Error(ctx, err)
+		return
+	}
+
+	historial, err := c.suscripcionService.GetHistorial(ctx.Request.Context(), tenantID)
+	if err != nil {
+		helper.Error(ctx, err)
+		return
+	}
+
+	helper.Success(ctx, historial)
 }
 
-// CambiarPlan POST /api/v1/suscripcion/cambiar-plan
-func (ctrl *SuscripcionController) CambiarPlan(c *gin.Context) {
-	tenantID, err := helper.GetTenantID(c)
+// CambiarPlan cambia el plan del tenant.
+// POST /api/v1/suscripcion/cambiar-plan
+func (c *SuscripcionController) CambiarPlan(ctx *gin.Context) {
+	tenantID, err := helper.GetTenantID(ctx)
 	if err != nil {
-		helper.Error(c, err)
+		helper.Error(ctx, err)
 		return
 	}
 
-	var req cambiarPlanRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		helper.ValidationError(c, "plan_codigo es obligatorio")
+	var req struct {
+		PlanCodigo     string `json:"plan_codigo" binding:"required"`
+		Ciclo          string `json:"ciclo"`
+		ReferenciaPago string `json:"referencia_pago"`
+		MetodoPago     string `json:"metodo_pago"`
+		Notas          string `json:"notas"`
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Datos inválidos", "detalle": err.Error()})
 		return
 	}
 
-	nueva, err := ctrl.suscripcionService.CambiarPlan(
-		c.Request.Context(), tenantID,
-		req.PlanCodigo, req.Ciclo, req.ReferenciaPago, req.MetodoPago, "UPGRADE",
-	)
+	params := service.CambiarPlanParams{
+		NuevoPlanCodigo: req.PlanCodigo,
+		Ciclo:           req.Ciclo,
+		ReferenciaPago:  req.ReferenciaPago,
+		MetodoPago:      req.MetodoPago,
+		ActivadoPor:     "UPGRADE",
+		Notas:           req.Notas,
+	}
+
+	nueva, err := c.suscripcionService.CambiarPlan(ctx.Request.Context(), tenantID, params)
 	if err != nil {
-		helper.Error(c, err)
+		helper.Error(ctx, err)
 		return
 	}
-	helper.Success(c, nueva)
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    nueva,
+		"message": "Plan actualizado exitosamente",
+	})
 }

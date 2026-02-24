@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { sedesApi } from '../api/sedes.api';
 import { notificar } from '@/aplicacion/helpers/toast';
 import { manejarError } from '@/aplicacion/helpers/errores';
+import { lazy, Suspense } from 'react';
 import type { Sede } from '@/tipos';
+
+const MapaUbicacion = lazy(() => import('@/aplicacion/componentes/MapaUbicacion'));
 
 interface Props {
   abierto: boolean;
@@ -234,10 +237,18 @@ export function FormSede({ abierto, alCerrar, alGuardar, sedeEditar }: Props) {
           {/* ── Sección: Geolocalización ── */}
           <fieldset>
             <legend className="text-sm font-medium text-gray-700 mb-3">Geolocalización</legend>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Campo etiqueta="Latitud" valor={form.latitud} onChange={(v) => actualizar('latitud', v)} placeholder="-12.1191" tipo="number" />
-              <Campo etiqueta="Longitud" valor={form.longitud} onChange={(v) => actualizar('longitud', v)} placeholder="-77.0373" tipo="number" />
-            </div>
+            <Suspense fallback={<div className="h-[300px] bg-gray-100 rounded-lg animate-pulse flex items-center justify-center text-gray-400 text-sm">Cargando mapa...</div>}>
+              <MapaUbicacion
+                latitud={form.latitud ? parseFloat(form.latitud) : null}
+                longitud={form.longitud ? parseFloat(form.longitud) : null}
+                editable={true}
+                altura={300}
+                alCambiar={(lat, lng) => {
+                  actualizar('latitud', String(lat));
+                  actualizar('longitud', String(lng));
+                }}
+              />
+            </Suspense>
           </fieldset>
 
           {/* ── Sección: Horario de atención ── */}

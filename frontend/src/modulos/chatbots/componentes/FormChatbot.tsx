@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { CodeplexModal } from '@codeplex-sac/utils';
-import { 
-  CodeplexCampoTexto, 
-  CodeplexSelector, 
-  CodeplexBoton, 
-  CodeplexAlerta 
+import {
+  CodeplexCampoTexto,
+  CodeplexSelector,
+  CodeplexBoton,
+  CodeplexAlerta
 } from '@codeplex-sac/ui';
 import { CodeplexPila } from '@codeplex-sac/layout';
-import { Box, Typography, Switch, Divider } from '@mui/material';
+import { Box, Typography, Switch, Divider, Slider } from '@mui/material';
 import { chatbotsApi } from '../api/chatbots.api';
 import { notificar } from '@/aplicacion/helpers/toast';
 import { manejarError } from '@/aplicacion/helpers/errores';
@@ -16,7 +16,7 @@ import type { SelectChangeEvent } from '@mui/material/Select';
 
 interface Props {
   abierto: boolean;
-  chatbotEditar?: Chatbot | null; 
+  chatbotEditar?: Chatbot | null;
   alCerrar: () => void;
   alGuardar: () => void;
 }
@@ -28,41 +28,46 @@ const TIPOS: { valor: TipoChatbot; etiqueta: string }[] = [
 ];
 
 const PERMISOS = [
-  { 
-    key: 'puede_leer_reclamos', 
-    label: 'Leer reclamos', 
+  {
+    key: 'puede_leer_reclamos',
+    label: 'Leer reclamos',
     desc: 'Puede consultar la lista y detalle de reclamos',
   },
-  { 
-    key: 'puede_responder', 
-    label: 'Crear respuestas', 
+  {
+    key: 'puede_responder',
+    label: 'Crear respuestas',
     desc: 'Puede generar respuestas oficiales a reclamos',
   },
-  { 
-    key: 'puede_cambiar_estado', 
-    label: 'Cambiar estado', 
+  {
+    key: 'puede_cambiar_estado',
+    label: 'Cambiar estado',
     desc: 'Puede cambiar el estado de un reclamo (Pendiente → En Proceso → Resuelto)',
   },
-  { 
-    key: 'puede_enviar_mensajes', 
-    label: 'Enviar mensajes', 
+  {
+    key: 'puede_enviar_mensajes',
+    label: 'Enviar mensajes',
     desc: 'Puede enviar mensajes de seguimiento al consumidor',
   },
-  { 
-    key: 'puede_leer_metricas', 
-    label: 'Leer métricas', 
+  {
+    key: 'puede_leer_metricas',
+    label: 'Leer métricas',
     desc: 'Puede acceder a estadísticas y reportes del tenant',
   },
 ];
+
+// Tipos que soportan config IA
+const TIPOS_CON_IA: TipoChatbot[] = ['ASISTENTE_IA', 'WHATSAPP_BOT'];
 
 export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Props) {
   const [nombre, setNombre] = useState('');
   const [tipo, setTipo] = useState<TipoChatbot>('ASISTENTE_IA');
   const [descripcion, setDescripcion] = useState('');
-  
-  // Campos avanzados IA
-  const [modelIA, setModelIA] = useState('gpt-4o');
-  const [prompt, setPrompt] = useState('Eres un asistente útil de atención al cliente.');
+
+  // Campos IA
+  const [modelIA, setModelIA] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [temperatura, setTemperatura] = useState(0.3);
+  const [maxTokens, setMaxTokens] = useState(600);
 
   // Permisos (scopes)
   const [permisos, setPermisos] = useState<Record<string, boolean>>({
@@ -78,13 +83,17 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
 
   const [cargando, setCargando] = useState(false);
 
+  const muestraConfigIA = TIPOS_CON_IA.includes(tipo);
+
   useEffect(() => {
     if (chatbotEditar) {
       setNombre(chatbotEditar.nombre);
       setTipo(chatbotEditar.tipo);
       setDescripcion(chatbotEditar.descripcion || '');
-      setModelIA(chatbotEditar.modelo_ia || 'gpt-4o');
+      setModelIA(chatbotEditar.modelo_ia || '');
       setPrompt(chatbotEditar.prompt_sistema || '');
+      setTemperatura(chatbotEditar.temperatura ?? 0.3);
+      setMaxTokens(chatbotEditar.max_tokens_respuesta ?? 600);
       setRequiereAprobacion(chatbotEditar.requiere_aprobacion || false);
       setPermisos({
         puede_leer_reclamos: chatbotEditar.puede_leer_reclamos ?? true,
@@ -97,8 +106,10 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
       setNombre('');
       setTipo('ASISTENTE_IA');
       setDescripcion('');
-      setModelIA('gpt-4o');
-      setPrompt('Eres un asistente útil de atención al cliente.');
+      setModelIA('');
+      setPrompt('');
+      setTemperatura(0.3);
+      setMaxTokens(600);
       setRequiereAprobacion(false);
       setPermisos({
         puede_leer_reclamos: true,
@@ -116,15 +127,18 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
 
   const guardar = async () => {
     if (!nombre.trim()) return notificar.advertencia('El nombre es obligatorio');
-    
+
     setCargando(true);
     try {
       const payload = {
         nombre,
         tipo,
         descripcion,
-        modelo_ia: tipo === 'ASISTENTE_IA' ? modelIA : undefined,
-        prompt_sistema: tipo === 'ASISTENTE_IA' ? prompt : undefined,
+        // Config IA (solo si el tipo lo soporta)
+        modelo_ia: muestraConfigIA ? modelIA : undefined,
+        prompt_sistema: muestraConfigIA ? prompt : undefined,
+        temperatura: muestraConfigIA ? temperatura : undefined,
+        max_tokens_respuesta: muestraConfigIA ? maxTokens : undefined,
         // Permisos
         puede_leer_reclamos: permisos.puede_leer_reclamos,
         puede_responder: permisos.puede_responder,
@@ -151,19 +165,19 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
   };
 
   return (
-    <CodeplexModal 
-      open={abierto} 
-      onClose={alCerrar} 
-      title={chatbotEditar ? "Editar Chatbot" : "Nuevo Chatbot"} 
+    <CodeplexModal
+      open={abierto}
+      onClose={alCerrar}
+      title={chatbotEditar ? "Editar Chatbot" : "Nuevo Chatbot"}
       maxWidth="md"
       footer={
         <CodeplexPila direccion="fila" espaciado={1} sx={{ justifyContent: 'flex-end' }}>
           <CodeplexBoton texto="Cancelar" variante="contorno" alHacerClick={alCerrar} />
-          <CodeplexBoton 
-            texto={chatbotEditar ? "Guardar Cambios" : "Crear Chatbot"} 
-            variante="primario" 
-            estado={cargando ? 'cargando' : 'inactivo'} 
-            alHacerClick={guardar} 
+          <CodeplexBoton
+            texto={chatbotEditar ? "Guardar Cambios" : "Crear Chatbot"}
+            variante="primario"
+            estado={cargando ? 'cargando' : 'inactivo'}
+            alHacerClick={guardar}
           />
         </CodeplexPila>
       }
@@ -171,26 +185,26 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
       <CodeplexPila direccion="columna" espaciado={2}>
         {/* ── Info básica ── */}
         <CodeplexPila direccion="fila" espaciado={2}>
-          <CodeplexCampoTexto 
-            etiqueta="Nombre *" 
-            valor={nombre} 
-            alCambiar={(e) => setNombre(e.target.value)} 
-            anchoCompleto 
+          <CodeplexCampoTexto
+            etiqueta="Nombre *"
+            valor={nombre}
+            alCambiar={(e) => setNombre(e.target.value)}
+            anchoCompleto
           />
-          <CodeplexSelector 
-            etiqueta="Tipo *" 
-            opciones={TIPOS} 
-            value={tipo} 
-            alCambiar={(e: SelectChangeEvent<unknown>) => setTipo(e.target.value as TipoChatbot)} 
+          <CodeplexSelector
+            etiqueta="Tipo *"
+            opciones={TIPOS}
+            value={tipo}
+            alCambiar={(e: SelectChangeEvent<unknown>) => setTipo(e.target.value as TipoChatbot)}
           />
         </CodeplexPila>
 
-        <CodeplexCampoTexto 
-          etiqueta="Descripción" 
-          valor={descripcion} 
-          alCambiar={(e) => setDescripcion(e.target.value)} 
-          multilinea 
-          filas={2} 
+        <CodeplexCampoTexto
+          etiqueta="Descripción"
+          valor={descripcion}
+          alCambiar={(e) => setDescripcion(e.target.value)}
+          multilinea
+          filas={2}
         />
 
         {/* ── Permisos ── */}
@@ -204,7 +218,7 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
           </Typography>
         </Box>
 
-        <Box sx={{ 
+        <Box sx={{
           display: 'flex', flexDirection: 'column', gap: 0,
           bgcolor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0', overflow: 'hidden',
         }}>
@@ -258,24 +272,71 @@ export function FormChatbot({ abierto, chatbotEditar, alCerrar, alGuardar }: Pro
           />
         </Box>
 
-        {/* ── Config IA (solo para ASISTENTE_IA) ── */}
-        {tipo === 'ASISTENTE_IA' && (
+        {/* ── Config IA (para ASISTENTE_IA y WHATSAPP_BOT) ── */}
+        {muestraConfigIA && (
           <>
             <Divider />
             <CodeplexPila direccion="columna" espaciado={2} sx={{ p: 2, bgcolor: '#f0f9ff', borderRadius: 2, border: '1px solid #bae6fd' }}>
-              <CodeplexAlerta variante="info" titulo="Configuración de IA" />
-              <CodeplexCampoTexto 
-                etiqueta="Prompt del Sistema (Instrucciones base)" 
-                valor={prompt} 
-                alCambiar={(e) => setPrompt(e.target.value)} 
-                multilinea 
-                filas={4} 
-                textoAyuda="Define la personalidad y reglas del bot."
+              <CodeplexAlerta
+                variante="info"
+                titulo="Configuración de IA"
+                descripcion={
+                  tipo === 'WHATSAPP_BOT'
+                    ? 'Agrega instrucciones propias del negocio (tono, horarios, reglas). El flujo de registro de reclamos está protegido y no se puede modificar.'
+                    : undefined
+                }
               />
-              <CodeplexCampoTexto 
-                etiqueta="Modelo (ej: gpt-4o, claude-3-5-sonnet)" 
-                valor={modelIA} 
-                alCambiar={(e) => setModelIA(e.target.value)} 
+              <CodeplexCampoTexto
+                etiqueta="Instrucciones adicionales del negocio"
+
+                valor={prompt}
+                alCambiar={(e) => setPrompt(e.target.value)}
+                multilinea
+                filas={6}
+                textoAyuda="Instrucciones complementarias: tono, horarios, reglas del negocio, etc. El flujo de registro y las reglas base del bot no se pueden modificar."
+              />
+              <CodeplexCampoTexto
+                etiqueta="Modelo de IA"
+                valor={modelIA}
+                alCambiar={(e) => setModelIA(e.target.value)}
+                marcador="Ej: gemini-2.0-flash, gpt-4o-mini, claude-3-5-sonnet"
+                textoAyuda="Modelo del proveedor configurado en el .env. Déjalo vacío para usar el modelo por defecto."
+              />
+
+              {/* Temperatura */}
+              <Box>
+                <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, color: '#1e293b' }}>
+                  Temperatura: {temperatura}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: '11px' }}>
+                  0 = respuestas precisas y consistentes · 1 = respuestas más creativas y variadas
+                </Typography>
+                <Slider
+                  value={temperatura}
+                  onChange={(_, v) => setTemperatura(v as number)}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  marks={[
+                    { value: 0, label: '0' },
+                    { value: 0.3, label: '0.3' },
+                    { value: 0.7, label: '0.7' },
+                    { value: 1, label: '1' },
+                  ]}
+                  sx={{ maxWidth: 400 }}
+                />
+              </Box>
+
+              {/* Max Tokens */}
+              <CodeplexCampoTexto
+                etiqueta="Máximo de tokens por respuesta"
+                valor={String(maxTokens)}
+                alCambiar={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val) && val > 0) setMaxTokens(val);
+                }}
+                marcador="600"
+                textoAyuda="Para WhatsApp se recomienda 400-800. Para asistente interno 800-2000."
               />
             </CodeplexPila>
           </>
