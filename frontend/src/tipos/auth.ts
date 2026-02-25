@@ -14,6 +14,7 @@ export interface LoginResponseRaw {
     email: string;
     nombre_completo: string;
     rol: RolUsuario;
+    sede_id?: string;
   };
 }
 
@@ -25,11 +26,12 @@ export interface LoginResponse {
 export interface UsuarioAuth {
   id: string;
   tenant_id: string;
-  tenant_slug: string; // ← Añadir esta línea
+  tenant_slug: string;
   email: string;
   nombre_completo: string;
   rol: RolUsuario;
   debe_cambiar_password: boolean;
+  sede_id?: string;
 }
 
 export type RolUsuario = 'SUPER_ADMIN' | 'ADMIN' | 'SOPORTE' | 'VISOR';

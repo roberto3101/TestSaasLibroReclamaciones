@@ -40,7 +40,8 @@ type LoginResult struct {
 		TenantSlug     string    `json:"tenant_slug"` // <--- Agregado
 		Email          string    `json:"email"`
 		NombreCompleto string    `json:"nombre_completo"`
-		Rol string `json:"rol"`
+		Rol    string  `json:"rol"`
+		SedeID *string `json:"sede_id,omitempty"`
 	} `json:"user"`
 }
 
@@ -91,8 +92,12 @@ func (s *AuthService) Login(ctx context.Context, email, password, ip, userAgent 
 	tenantID := user.TenantID
 	fmt.Println(">>> Tenant ID:", tenantID)
 
-	// Generar JWT
-	token, err := middleware.GenerateToken(tenantID, user.ID, user.Rol, s.jwtCfg)
+	// Generar JWT (incluye sede_id si el usuario tiene sede asignada)
+	var sedeID *uuid.UUID
+	if user.SedeID.Valid {
+		sedeID = &user.SedeID.UUID
+	}
+	token, err := middleware.GenerateToken(tenantID, user.ID, user.Rol, sedeID, s.jwtCfg)
 	if err != nil {
 		fmt.Println(">>> ❌ JWT ERROR:", err)
 		return nil, fmt.Errorf("auth_service.Login token: %w", err)
@@ -134,6 +139,10 @@ func (s *AuthService) Login(ctx context.Context, email, password, ip, userAgent 
 	result.User.Email = user.Email
 	result.User.NombreCompleto = user.NombreCompleto
 	result.User.Rol = user.Rol
+	if user.SedeID.Valid {
+		sedeIDStr := user.SedeID.UUID.String()
+		result.User.SedeID = &sedeIDStr
+	}
 
 	fmt.Println(">>> ✅ LOGIN SUCCESS!")
 	fmt.Println("========================================")

@@ -23,6 +23,7 @@ export const authApi = {
         rol: raw.user.rol,
        tenant_id: raw.user.tenant_id,
         tenant_slug: raw.user.tenant_slug,
+        sede_id: raw.user.sede_id,
         debe_cambiar_password: false,
       },
     };

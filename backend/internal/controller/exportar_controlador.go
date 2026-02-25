@@ -93,6 +93,10 @@ func (ctrl *ExportarControlador) obtenerDatosExportacion(c *gin.Context, tenantI
 			filtros.SedeID = &parsed
 		}
 	}
+	// SOPORTE con sede asignada: forzar su sede
+	if userSedeID := helper.GetUserSedeID(c); userSedeID != nil {
+		filtros.SedeID = userSedeID
+	}
 	if usuarioParam := c.Query("usuario_id"); usuarioParam != "" {
 		if parsed, err := uuid.Parse(usuarioParam); err == nil {
 			filtros.AtendidoPor = &parsed

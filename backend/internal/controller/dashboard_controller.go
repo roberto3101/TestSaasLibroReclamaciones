@@ -50,6 +50,10 @@ func (ctrl *DashboardController) GetMetricas(c *gin.Context) {
 			sedeID = &parsed
 		}
 	}
+	// SOPORTE con sede asignada: forzar su sede
+	if userSedeID := helper.GetUserSedeID(c); userSedeID != nil {
+		sedeID = userSedeID
+	}
 
 	metricas, err := ctrl.dashboardRepo.GetMetricas(c.Request.Context(), tenantID, sedeID)
 	if err != nil {

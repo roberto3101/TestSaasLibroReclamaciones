@@ -35,6 +35,10 @@ func (ctrl *ReclamoController) GetAll(c *gin.Context) {
 			sedeID = &parsed
 		}
 	}
+	// SOPORTE con sede asignada: forzar su sede (no puede ver otras)
+	if userSedeID := helper.GetUserSedeID(c); userSedeID != nil {
+		sedeID = userSedeID
+	}
 
 	var fechaDesde, fechaHasta *time.Time
 

@@ -18,6 +18,7 @@ type Claims struct {
 	TenantID string `json:"tenant_id"`
 	UserID   string `json:"user_id"`
 	Role     string `json:"role"`
+	SedeID   string `json:"sede_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -56,6 +57,11 @@ func AuthMiddleware(jwtCfg config.JWTConfig) gin.HandlerFunc {
 		helper.SetContext(c, helper.CtxTenantID, tenantID)
 		helper.SetContext(c, helper.CtxUserID, userID)
 		helper.SetContext(c, helper.CtxUserRole, claims.Role)
+		if claims.SedeID != "" {
+			if sedeUUID, err := uuid.Parse(claims.SedeID); err == nil {
+				helper.SetContext(c, helper.CtxSedeID, sedeUUID)
+			}
+		}
 		helper.SetContext(c, helper.CtxIPAddress, helper.GetClientIP(c))
 
 		c.Next()
@@ -63,12 +69,17 @@ func AuthMiddleware(jwtCfg config.JWTConfig) gin.HandlerFunc {
 }
 
 // GenerateToken crea un JWT firmado.
-func GenerateToken(tenantID, userID uuid.UUID, role string, jwtCfg config.JWTConfig) (string, error) {
+func GenerateToken(tenantID, userID uuid.UUID, role string, sedeID *uuid.UUID, jwtCfg config.JWTConfig) (string, error) {
 	now := time.Now()
+	sedeStr := ""
+	if sedeID != nil {
+		sedeStr = sedeID.String()
+	}
 	claims := Claims{
 		TenantID: tenantID.String(),
 		UserID:   userID.String(),
 		Role:     role,
+		SedeID:   sedeStr,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(jwtCfg.ExpirationHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(now),

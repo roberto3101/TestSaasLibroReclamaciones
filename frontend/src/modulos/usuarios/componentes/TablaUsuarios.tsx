@@ -146,8 +146,8 @@ export function TablaUsuarios({ usuarios, sedes, cargando, alRecargar, alEditar,
           const sedeId = typeof raw === 'object' && raw !== null ? raw.UUID || null : raw;
           const nombre = sedeId && sedeId !== '00000000-0000-0000-0000-000000000000' ? sedesMap[sedeId] : null;
           return (
-            <Typography variant="body2" sx={{ color: nombre ? '#374151' : '#9ca3af', fontSize: '13px' }}>
-              {nombre || 'Todas las sedes'}
+            <Typography variant="body2" sx={{ color: nombre ? '#374151' : '#16a34a', fontSize: '13px', fontWeight: nombre ? 400 : 600 }}>
+              {nombre || '🌐 Acceso global'}
             </Typography>
           );
         },

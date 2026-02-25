@@ -42,6 +42,19 @@ func GetUserRole(c *gin.Context) string {
 	return ""
 }
 
+// GetUserSedeID extrae la sede asignada del usuario. Retorna nil si no tiene (acceso global).
+func GetUserSedeID(c *gin.Context) *uuid.UUID {
+	val, exists := c.Get(CtxSedeID)
+	if !exists {
+		return nil
+	}
+	id, ok := val.(uuid.UUID)
+	if !ok {
+		return nil
+	}
+	return &id
+}
+
 // GetClientIP retorna la IP real del cliente.
 func GetClientIP(c *gin.Context) string {
 	return c.ClientIP()

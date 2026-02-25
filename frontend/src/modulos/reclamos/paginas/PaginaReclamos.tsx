@@ -7,6 +7,7 @@ import { usarSedes } from '@/modulos/sedes/ganchos/usarSedes';
 import { TablaReclamos } from '../componentes/TablaReclamos';
 import { reclamosApi } from '../api/reclamos.api';
 import { notificar } from '@/aplicacion/helpers/toast';
+import { usarAuth } from '@/aplicacion/ganchos/usarAuth';
 
 type Periodo = '' | 'hoy' | 'semana' | 'mes' | 'anio' | 'personalizado';
 
@@ -31,7 +32,9 @@ const construirParams = (sedeId: string, periodo: Periodo, fechaDesde: string, f
 };
 
 export default function PaginaReclamos() {
-  const [sedeId, setSedeId] = useState('');
+  const { usuario } = usarAuth();
+  const sedeUsuario = usuario?.sede_id || '';
+  const [sedeId, setSedeId] = useState(sedeUsuario);
   const [periodo, setPeriodo] = useState<Periodo>('');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
@@ -85,7 +88,12 @@ export default function PaginaReclamos() {
         <h2 style={{ margin: 0 }}>Gestión de Reclamos</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
 
-          <select value={sedeId} onChange={(e) => setSedeId(e.target.value)} style={{ ...estiloSelect, minWidth: 160 }}>
+          <select
+            value={sedeUsuario || sedeId}
+            onChange={(e) => !sedeUsuario && setSedeId(e.target.value)}
+            disabled={!!sedeUsuario}
+            style={{ ...estiloSelect, minWidth: 160, opacity: sedeUsuario ? 0.6 : 1 }}
+          >
             <option value="">Todas las sedes</option>
             {sedes.map((s) => (
               <option key={s.id} value={s.id}>{s.nombre}</option>
